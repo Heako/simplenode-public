@@ -1,5 +1,6 @@
 "use client";
 
+import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { Check, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
@@ -398,11 +399,15 @@ function StorageSection() {
 }
 
 function AboutSection() {
+  const [version, setVersion] = useState("");
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => {});
+  }, []);
   return (
     <Section id="about" icon={Info} title="À propos" description="SimpleNode — canvas à nœuds pour la génération IA.">
       <dl className="grid grid-cols-[140px_1fr] gap-y-1.5 text-[12px]">
         <dt className="text-muted">Version</dt>
-        <dd>0.1.0</dd>
+        <dd>{version}</dd>
         <dt className="text-muted">Modèles</dt>
         <dd>Exécutés via fal.ai</dd>
         <dt className="text-muted">Logos</dt>

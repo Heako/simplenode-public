@@ -277,6 +277,53 @@ function DownloadButton({ path, name, className }: { path: string; name?: string
   );
 }
 
+/**
+ * Saves every generation of a node into a folder the user picks, numbered in
+ * history order (name-1.png, name-2.png…).
+ */
+function DownloadAllButton({ paths, name, className }: { paths: string[]; name?: string; className: string }) {
+  const [state, setState] = useState<"idle" | "busy" | "done" | "error">("idle");
+  const local = paths.filter((p) => p.startsWith("/"));
+  if (local.length < 2) return null;
+
+  async function download(e: ReactMouseEvent) {
+    e.stopPropagation();
+    const dir = await open({ directory: true, title: `Choisir un dossier pour les ${local.length} générations` });
+    if (typeof dir !== "string") return;
+    setState("busy");
+    const base = slugify(name || "simplenode");
+    try {
+      for (const [i, path] of local.entries()) {
+        await invoke("save_media", { source: path, dest: `${dir}/${base}-${i + 1}.${path.split(".").pop() ?? "png"}` });
+      }
+      setState("done");
+    } catch {
+      setState("error");
+    }
+    setTimeout(() => setState("idle"), 1500);
+  }
+
+  return (
+    <button
+      type="button"
+      onClick={download}
+      disabled={state === "busy"}
+      title={state === "error" ? "Échec de l'enregistrement" : `Tout télécharger (${local.length})`}
+      className={className}
+    >
+      {state === "busy" ? (
+        <Loader2 size={14} className="animate-spin" />
+      ) : state === "done" ? (
+        <Check size={14} />
+      ) : state === "error" ? (
+        <X size={14} />
+      ) : (
+        <FolderDown size={14} />
+      )}
+    </button>
+  );
+}
+
 const toolButton = "nodrag grid h-7 w-7 place-items-center rounded-md text-white/90 hover:bg-white/15 hover:text-white";
 
 /** Full-window viewer; Escape or a click outside closes it. */
@@ -386,6 +433,7 @@ function Media({
           )}
           <div className="ml-auto flex gap-0.5">
             <DownloadButton path={value} name={name} className={toolButton} />
+            {history && <DownloadAllButton paths={history} name={name} className={toolButton} />}
             <button className={toolButton} onClick={() => setFull(true)} title="Plein écran">
               <Maximize2 size={14} />
             </button>
