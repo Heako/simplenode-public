@@ -1,0 +1,86 @@
+@import "tailwindcss";
+/* React Flow base styles first, so the overrides below win. */
+@import "@xyflow/react/dist/style.css";
+
+:root {
+  --bg: #161618;
+  --panel: #212124;
+  --panel-2: #2a2a2e;
+  --border: #323237;
+  --text: #ededf0;
+  --muted: #8d8d96;
+  --accent: #8b7bff;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-panel-2: var(--panel-2);
+  --color-line: var(--border);
+  --color-fg: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+  overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.react-flow {
+  --xy-background-color: var(--bg);
+  --xy-edge-stroke: #6b6b75;
+  --xy-edge-stroke-selected: #ffffff;
+  --xy-edge-stroke-width: 2;
+  --xy-connectionline-stroke: var(--accent);
+  --xy-minimap-background-color: var(--panel);
+}
+
+.react-flow__node {
+  /* Let port labels sit outside the card. */
+  overflow: visible;
+}
+
+.react-flow__edge.selected .react-flow__edge-path {
+  stroke-width: 3;
+  filter: drop-shadow(0 0 4px rgb(255 255 255 / 0.35));
+}
+
+.react-flow__handle {
+  transition: box-shadow 120ms;
+}
+.react-flow__handle:hover,
+.react-flow__handle.connectingto {
+  box-shadow: 0 0 0 4px rgb(255 255 255 / 0.15);
+}
+
+.checker {
+  background-color: #1b1b1e;
+  background-image:
+    linear-gradient(45deg, #232327 25%, transparent 25%), linear-gradient(-45deg, #232327 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #232327 75%), linear-gradient(-45deg, transparent 75%, #232327 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+
+textarea,
+input,
+.ProseMirror {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Tiptap prompt editor: placeholder on the empty first line. */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--muted);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
