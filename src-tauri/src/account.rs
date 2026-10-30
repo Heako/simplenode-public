@@ -1,7 +1,15 @@
-//! fal account: API keys in the OS keychain, model prices and real spend
-//! from fal's Platform API.
+//! fal account: API keys in a private file of the app, model prices and real
+//! spend from fal's Platform API.
+//!
+//! Keys used to live in the macOS keychain, which asks for the session
+//! password whenever the app's binary changes (every dev rebuild, every
+//! update). They now sit in `keys.json` in the app's config folder, readable
+//! by the user only (like `gh` or `fal` tokens); a key left in the keychain
+//! is moved there once.
 
 use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -37,32 +45,79 @@ impl KeyKind {
     }
 }
 
-fn entry(kind: KeyKind) -> Result<keyring::Entry> {
-    Ok(keyring::Entry::new(KEYRING_SERVICE, kind.user())?)
+/// Contents of `keys.json`.
+#[derive(Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct KeyFile {
+    #[serde(default)]
+    keys: HashMap<String, String>,
+    /// Set once keychain entries have been moved here, so the keychain
+    /// (and its password prompt) is never touched again.
+    #[serde(default)]
+    keychain_migrated: bool,
 }
 
-/// Keys read from the keychain, kept for the app's lifetime. macOS asks the
-/// user each time an unknown binary reads the keychain, and dev rebuilds are
-/// always unknown, so reading once per launch keeps that to one prompt.
-fn cache() -> &'static Mutex<HashMap<KeyKind, Option<String>>> {
-    static CACHE: OnceLock<Mutex<HashMap<KeyKind, Option<String>>>> = OnceLock::new();
-    CACHE.get_or_init(Default::default)
+static KEY_FILE: OnceLock<PathBuf> = OnceLock::new();
+
+/// Sets where keys are stored; called once at startup.
+pub fn init(config_dir: PathBuf) {
+    let _ = KEY_FILE.set(config_dir.join("keys.json"));
+}
+
+fn key_path() -> Result<&'static PathBuf> {
+    KEY_FILE.get().ok_or_else(|| AppError::Invalid("stockage des clés non initialisé".into()))
+}
+
+/// The key file, loaded once; keychain entries are moved into it the first time.
+fn keys() -> Result<&'static Mutex<KeyFile>> {
+    static KEYS: OnceLock<Mutex<KeyFile>> = OnceLock::new();
+    if let Some(k) = KEYS.get() {
+        return Ok(k);
+    }
+    let path = key_path()?;
+    let mut file: KeyFile = match fs::read(path) {
+        Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_default(),
+        Err(_) => KeyFile::default(),
+    };
+    if !file.keychain_migrated {
+        // A refused or failed read is retried next launch rather than losing the key.
+        let mut complete = true;
+        for kind in [KeyKind::Main, KeyKind::Billing] {
+            match keyring::Entry::new(KEYRING_SERVICE, kind.user()).and_then(|e| e.get_password()) {
+                Ok(key) => {
+                    file.keys.entry(kind.user().to_owned()).or_insert(key);
+                }
+                Err(keyring::Error::NoEntry) => {}
+                Err(_) => complete = false,
+            }
+        }
+        file.keychain_migrated = complete;
+        save(&file)?;
+    }
+    Ok(KEYS.get_or_init(|| Mutex::new(file)))
+}
+
+/// Writes the key file, readable and writable by the user only.
+fn save(file: &KeyFile) -> Result<()> {
+    let path = key_path()?;
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    std::io::Write::write_all(&mut options.open(&tmp)?, &serde_json::to_vec_pretty(file).map_err(|e| AppError::Invalid(e.to_string()))?)?;
+    fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 fn stored(kind: KeyKind) -> Result<Option<String>> {
-    if let Some(hit) = cache().lock().unwrap().get(&kind) {
-        return Ok(hit.clone());
-    }
-    let key = match entry(kind)?.get_password() {
-        Ok(key) => Some(key),
-        Err(keyring::Error::NoEntry) => None,
-        Err(err) => return Err(err.into()),
-    };
-    cache().lock().unwrap().insert(kind, key.clone());
-    Ok(key)
+    Ok(keys()?.lock().unwrap().keys.get(kind.user()).cloned())
 }
 
-/// The keychain wins; `FAL_KEY` in the environment is a dev fallback.
+/// The saved key wins; `FAL_KEY` in the environment is a dev fallback.
 pub fn main_key() -> Result<String> {
     match stored(KeyKind::Main)? {
         Some(key) => Ok(key),
@@ -81,30 +136,26 @@ fn billing_key() -> Result<String> {
 
 pub fn set_key(kind: KeyKind, key: &str) -> Result<()> {
     let key = key.trim();
+    let mut file = keys()?.lock().unwrap();
     if key.is_empty() {
-        match entry(kind)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => {}
-            Err(err) => return Err(err.into()),
-        }
-        cache().lock().unwrap().insert(kind, None);
-        return Ok(());
+        file.keys.remove(kind.user());
+    } else {
+        file.keys.insert(kind.user().to_owned(), key.to_owned());
     }
-    entry(kind)?.set_password(key)?;
-    cache().lock().unwrap().insert(kind, Some(key.to_owned()));
-    Ok(())
+    save(&file)
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyStatus {
-    /// "keychain", "env" or null.
+    /// "saved", "env" or null.
     main: Option<&'static str>,
     billing: bool,
 }
 
 pub fn key_status() -> Result<KeyStatus> {
     let main = if stored(KeyKind::Main)?.is_some() {
-        Some("keychain")
+        Some("saved")
     } else if std::env::var("FAL_KEY").is_ok() {
         Some("env")
     } else {

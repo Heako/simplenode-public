@@ -68,7 +68,8 @@ interface FlowState {
   title: string;
   nodes: FlowNode[];
   edges: Edge[];
-  running: boolean;
+  /** Targets of the runs in progress: a node id, or "*" for the whole canvas. */
+  runs: string[];
   /** Node whose title is being edited, if any. */
   renamingId: string | null;
   setRenaming: (id: string | null) => void;
@@ -126,6 +127,11 @@ interface FlowState {
   run: (targetId?: string) => Promise<void>;
   applyStatus: (event: NodeStatusEvent) => void;
   clear: () => void;
+  /**
+   * Empties the results (current output and history) of model nodes: those in
+   * `ids`, else the selected ones, else all. Returns how many were purged.
+   */
+  purgeResults: (ids?: string[]) => number;
   openProject: (project: Project) => void;
   closeProject: () => void;
 }
@@ -192,13 +198,18 @@ function wouldCycle(source: string, target: string, edges: Edge[]) {
   return source === target || ancestors(source, edges).has(target);
 }
 
+/** True while `id` is running or is the target of a run, so it can't be started twice. */
+export function useRunning(id: string) {
+  return useFlow((s) => s.runs.includes(id) || s.nodes.some((n) => n.id === id && n.data.status === "running"));
+}
+
 export const useFlow = create<FlowState>()((set, get) => ({
   projectId: null,
   trashed: false,
   title: "Sans titre",
   nodes: [],
   edges: [],
-  running: false,
+  runs: [],
   notice: null,
   setNotice: (notice) => set({ notice }),
   renamingId: null,
@@ -440,8 +451,10 @@ export const useFlow = create<FlowState>()((set, get) => ({
 
   /** Execution happens in Rust; progress arrives through `applyStatus`. */
   run: async (targetId) => {
-    if (get().running) return;
-    set({ running: true });
+    // Several runs can go at once; Rust shares the nodes they have in common.
+    const key = targetId ?? "*";
+    if (get().runs.includes(key)) return;
+    set({ runs: [...get().runs, key] });
     const { nodes, edges } = get();
     try {
       await invoke("run_graph", {
@@ -455,10 +468,10 @@ export const useFlow = create<FlowState>()((set, get) => ({
         target: targetId ?? null,
       });
     } catch (err) {
-      // Graph-level failures (missing key, already running) have no node to attach to.
+      // Graph-level failures (missing key) have no node to attach to.
       set({ notice: String(err) });
     } finally {
-      set({ running: false });
+      set({ runs: get().runs.filter((r) => r !== key) });
     }
   },
 
@@ -492,6 +505,24 @@ export const useFlow = create<FlowState>()((set, get) => ({
   clear: () => {
     get().checkpoint();
     set({ nodes: [], edges: [] });
+  },
+
+  purgeResults: (ids) => {
+    const { nodes, edges } = get();
+    const hasResults = (n: FlowNode) => n.data.kind === "model" && (Object.keys(n.data.outputs).length > 0 || !!n.data.history?.length);
+    const selected = nodes.filter((n) => n.selected && n.data.kind === "model");
+    const scope = ids ? new Set(ids) : selected.length ? new Set(selected.map((n) => n.id)) : null;
+    const targets = nodes.filter((n) => hasResults(n) && n.data.status !== "running" && (!scope || scope.has(n.id)));
+    if (!targets.length) return 0;
+    get().checkpoint();
+    const purge = new Set(targets.map((n) => n.id));
+    set({
+      nodes: propagate(
+        nodes.map((n) => (purge.has(n.id) ? { ...n, data: { ...n.data, outputs: {}, history: [], status: "idle", error: undefined } } : n)),
+        edges,
+      ),
+    });
+    return targets.length;
   },
 
   openProject: ({ id, title, trashed, nodes, edges }) =>

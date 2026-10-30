@@ -9,17 +9,15 @@ mod schema;
 mod storage;
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use tauri::{AppHandle, State};
 
 use account::KeyKind;
-use error::{AppError, Result};
+use error::Result;
 use graph::{GraphEdge, GraphNode};
 
 struct AppState {
     http: reqwest::Client,
-    running: AtomicBool,
 }
 
 #[tauri::command]
@@ -116,16 +114,9 @@ async fn run_graph(
     edges: Vec<GraphEdge>,
     target: Option<String>,
 ) -> Result<()> {
-    if state.running.swap(true, Ordering::SeqCst) {
-        return Err(AppError::Invalid("Une exécution est déjà en cours".into()));
-    }
-    let result = async {
-        let fal = fal::Fal::new(state.http.clone(), account::main_key()?);
-        graph::run(&app, &fal, &state.http, nodes, edges, target).await
-    }
-    .await;
-    state.running.store(false, Ordering::SeqCst);
-    result
+    // Runs may overlap: graph::run shares the nodes they have in common.
+    let fal = fal::Fal::new(state.http.clone(), account::main_key()?);
+    graph::run(&app, &fal, &state.http, nodes, edges, target).await
 }
 
 /// Renders a Seedance draft in 1080p and stores it locally.
@@ -141,8 +132,9 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
-        .manage(AppState { http: reqwest::Client::new(), running: AtomicBool::new(false) })
+        .manage(AppState { http: reqwest::Client::new() })
         .setup(|app| {
+            account::init(tauri::Manager::path(app).app_config_dir()?);
             if cfg!(debug_assertions) {
                 app.handle().plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())?;
             }

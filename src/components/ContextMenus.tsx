@@ -1,8 +1,8 @@
 "use client";
 
-import { Copy, CopyPlus, PencilLine, Play, Search, Trash2, type LucideIcon } from "lucide-react";
+import { Copy, CopyPlus, Eraser, PencilLine, Play, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useFlow, type PendingLink } from "@/lib/store";
+import { useFlow, useRunning, type PendingLink } from "@/lib/store";
 import { defaultParams, libraryItems, portsCompatible, portsFor, useModels, type LibraryItem, type PortType } from "@/lib/spec";
 import ProviderIcon from "./ProviderIcon";
 import { GROUP_ORDER, GROUP_TITLES, filterItems, itemIcon, usePlaceItem } from "./Library";
@@ -165,9 +165,15 @@ export function AddNodeMenu({ x, y, link, onClose }: { x: number; y: number; lin
 /** Right-click on a node. */
 export function NodeMenu({ x, y, nodeId, onClose }: { x: number; y: number; nodeId: string; onClose: () => void }) {
   const run = useFlow((s) => s.run);
-  const running = useFlow((s) => s.running);
+  const running = useRunning(nodeId);
   const duplicateNode = useFlow((s) => s.duplicateNode);
   const copyNodes = useFlow((s) => s.copyNodes);
+  const purgeResults = useFlow((s) => s.purgeResults);
+  const isModel = useFlow((s) => s.nodes.find((n) => n.id === nodeId)?.data.kind === "model");
+  const hasResults = useFlow((s) => {
+    const data = s.nodes.find((n) => n.id === nodeId)?.data;
+    return !!data && (Object.keys(data.outputs).length > 0 || !!data.history?.length);
+  });
   const setRenaming = useFlow((s) => s.setRenaming);
   const deleteNode = useFlow((s) => s.deleteNode);
 
@@ -176,6 +182,7 @@ export function NodeMenu({ x, y, nodeId, onClose }: { x: number; y: number; node
     { label: "Renommer", icon: PencilLine, action: () => setRenaming(nodeId) },
     { label: "Copier", hint: "⌘C", icon: Copy, action: () => copyNodes(nodeId) },
     { label: "Dupliquer", hint: "⌘D", icon: CopyPlus, action: () => duplicateNode(nodeId) },
+    ...(isModel ? [{ label: "Vider les résultats", icon: Eraser, disabled: !hasResults || running, action: () => purgeResults([nodeId]) }] : []),
     { label: "Supprimer", icon: Trash2, danger: true, action: () => deleteNode(nodeId) },
   ];
 

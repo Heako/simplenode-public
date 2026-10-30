@@ -10,7 +10,7 @@ import { useModels } from "@/lib/spec";
 type KeyKind = "main" | "billing";
 
 interface KeyStatus {
-  main: "keychain" | "env" | null;
+  main: "saved" | "env" | null;
   billing: boolean;
 }
 
@@ -165,7 +165,7 @@ function KeysSection() {
   }, [refresh]);
 
   return (
-    <Section id="keys" icon={KeyRound} title="Clé API fal.ai" description="Stockées dans le trousseau du système, jamais dans vos projets.">
+    <Section id="keys" icon={KeyRound} title="Clé API fal.ai" description="Stockées sur cet ordinateur dans un fichier privé de l'app, jamais dans vos projets.">
       <div className="divide-y divide-line">
         <KeyField
           kind="main"

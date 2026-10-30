@@ -3,7 +3,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow, useViewport } from "@xyflow/react";
-import { AlignHorizontalDistributeCenter, Hand, MousePointer2, Play, Redo2, Trash2, Undo2 } from "lucide-react";
+import { AlignHorizontalDistributeCenter, Eraser, Hand, MousePointer2, Play, Redo2, Trash2, Undo2 } from "lucide-react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
@@ -28,8 +28,20 @@ function mediaOf(path: string): "image" | "video" | "audio" | null {
 /** Floating card, top right: run controls. The API key lives on the home page. */
 function RunCard() {
   const run = useFlow((s) => s.run);
-  const running = useFlow((s) => s.running);
+  const running = useFlow((s) => s.runs.includes("*"));
   const clear = useFlow((s) => s.clear);
+  const purgeResults = useFlow((s) => s.purgeResults);
+  const setNotice = useFlow((s) => s.setNotice);
+  const scoped = useFlow((s) => s.nodes.some((n) => n.selected && n.data.kind === "model"));
+
+  function purge() {
+    const count = purgeResults();
+    setNotice(
+      count
+        ? `Résultats vidés sur ${count} modèle${count > 1 ? "s" : ""} (annulable avec ⌘Z).`
+        : "Aucun résultat à vider.",
+    );
+  }
 
   return (
     <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-2xl border border-line bg-panel/95 p-1.5 shadow-xl backdrop-blur">
@@ -39,6 +51,13 @@ function RunCard() {
         onClick={clear}
       >
         <Trash2 size={13} />
+      </button>
+      <button
+        className="grid h-7 w-7 place-items-center rounded-lg text-muted hover:text-fg"
+        title={`Vider les résultats ${scoped ? "des modèles sélectionnés" : "de tous les modèles"} : image et historique (annulable avec ⌘Z)`}
+        onClick={purge}
+      >
+        <Eraser size={13} />
       </button>
       <button
         className="flex items-center gap-1.5 rounded-lg bg-fg px-3 py-1.5 text-xs font-medium text-bg disabled:opacity-50"

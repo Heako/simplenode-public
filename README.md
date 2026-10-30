@@ -63,7 +63,7 @@ Au premier lancement :
 2. Collez votre clé fal.ai dans **Clé de génération**, puis cliquez sur **Tester**.
 3. Revenez à **Mes fichiers**, créez un **Nouveau fichier**, ajoutez des nœuds et lancez **Tout exécuter**.
 
-La clé est enregistrée dans le trousseau du système (Trousseau d'accès sur macOS), jamais dans les projets. En développement, la variable d'environnement `FAL_KEY` est utilisée si aucune clé n'est enregistrée.
+La clé est enregistrée dans un fichier privé de l'app (`keys.json` dans son dossier de configuration, lisible par votre compte uniquement), jamais dans les projets. Contrairement au trousseau macOS, il ne demande pas le mot de passe de session après chaque mise à jour de l'app. En développement, la variable d'environnement `FAL_KEY` est utilisée si aucune clé n'est enregistrée.
 
 ### Voir ses dépenses
 
@@ -142,7 +142,7 @@ src-tauri/src/            Backend Rust
   models.rs               Registre des modèles fal (source de vérité)
   graph.rs                Exécution du graphe
   fal.rs                  Client fal : file d'attente, upload, brouillons
-  account.rs              Clés (trousseau), tarifs, dépenses
+  account.rs              Clés (fichier privé), tarifs, dépenses
   projects.rs             Fichiers projets
   storage.rs              Médias locaux, crop, nettoyage
   lib.rs                  Commandes Tauri

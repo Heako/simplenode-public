@@ -37,7 +37,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useFlow, type FlowNode } from "@/lib/store";
+import { useFlow, useRunning, type FlowNode } from "@/lib/store";
 import ProviderIcon from "./ProviderIcon";
 import TemplateEditor, { type TemplateEditorHandle, type VarDisplay } from "./TemplateEditor";
 import { ANGLE_LAYOUTS, MAX_GRID, PORT_COLORS, varLabel, angleLayout, angleShots, findModel, gridSize, parseViews, listItems, llmOptions, portsFor, promptVars, useModels, type Port, type View } from "@/lib/spec";
@@ -122,7 +122,7 @@ function NodeShell({
   children: ReactNode;
 }) {
   const run = useFlow((s) => s.run);
-  const running = useFlow((s) => s.running);
+  const running = useRunning(id);
   const checkpoint = useFlow((s) => s.checkpoint);
   const renaming = useFlow((s) => s.renamingId === id);
   const setRenaming = useFlow((s) => s.setRenaming);
@@ -635,7 +635,7 @@ export function ModelNode(props: NodeProps<FlowNode>) {
   const isLlm = model?.category === "llm";
   const isVideo = model?.category === "video";
   const patchNode = useFlow((s) => s.patchNode);
-  const running = useFlow((s) => s.running);
+  const running = useRunning(id);
   const [finalizing, setFinalizing] = useState(false);
   const pickHistory = useFlow((s) => s.pickHistory);
   const run = useFlow((s) => s.run);

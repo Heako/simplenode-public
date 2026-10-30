@@ -1,12 +1,15 @@
 //! Graph execution: topological order, cached outputs, failure propagation.
-//! Progress is streamed to the UI as `node-status` events.
+//! Progress is streamed to the UI as `node-status` events. Several runs can go
+//! at once; a node two of them need is executed once and shared.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use futures::future::try_join_all;
+use tokio::sync::watch;
 
 use crate::angles;
 use crate::error::{AppError, Result};
@@ -15,6 +18,25 @@ use crate::models::{self, Category, MediaKind};
 use crate::storage::{self, CropSpec, View};
 
 pub type Ports = HashMap<String, String>;
+
+/// Outcome of a node execution, as seen by runs waiting for it.
+type Outcome = Option<std::result::Result<Ports, String>>;
+
+/// Nodes being executed by any run, keyed by id. A run that reaches one of
+/// them waits for that result instead of executing (and paying for) it again.
+fn in_flight() -> &'static Mutex<HashMap<String, watch::Receiver<Outcome>>> {
+    static IN_FLIGHT: OnceLock<Mutex<HashMap<String, watch::Receiver<Outcome>>>> = OnceLock::new();
+    IN_FLIGHT.get_or_init(Default::default)
+}
+
+/// Frees a node's in-flight slot however its execution ends.
+struct Claim(String);
+
+impl Drop for Claim {
+    fn drop(&mut self) {
+        in_flight().lock().unwrap().remove(&self.0);
+    }
+}
 /// Input ports can take several edges (e.g. multiple reference images).
 type Inputs = HashMap<String, Vec<String>>;
 
@@ -432,8 +454,40 @@ pub async fn run(
             }
         }
 
+        // Already executing in another run: take its result. That run sends
+        // the node's statuses.
+        let pending = {
+            let mut map = in_flight().lock().unwrap();
+            match map.get(&id) {
+                Some(rx) => Err(rx.clone()),
+                None => {
+                    let (tx, rx) = watch::channel(None);
+                    map.insert(id.clone(), rx);
+                    Ok(tx)
+                }
+            }
+        };
+        let tx = match pending {
+            Ok(tx) => tx,
+            Err(mut rx) => {
+                let shared = rx.wait_for(Option::is_some).await.ok().and_then(|o| o.clone()).and_then(|r| r.ok());
+                match shared {
+                    Some(outs) => {
+                        outputs.insert(id.clone(), outs);
+                    }
+                    None => {
+                        failed.insert(id.clone());
+                    }
+                }
+                continue;
+            }
+        };
+        let _claim = Claim(id.clone());
+
         emit("running", None, None)?;
-        match execute(app, fal, http, node, &inputs).await {
+        let result = execute(app, fal, http, node, &inputs).await;
+        tx.send_replace(Some(result.as_ref().map(Clone::clone).map_err(ToString::to_string)));
+        match result {
             Ok(outs) => {
                 emit("done", Some(&outs), None)?;
                 outputs.insert(id.clone(), outs);

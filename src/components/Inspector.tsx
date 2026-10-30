@@ -5,7 +5,7 @@ import { useStore as useFlowStore } from "@xyflow/react";
 import { ArrowRight, ChevronRight, Info, Loader2, Minus, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
-import { useFlow, type FlowNode } from "@/lib/store";
+import { useFlow, useRunning, type FlowNode } from "@/lib/store";
 import { findModel, useModels } from "@/lib/spec";
 import { isAdvanced, optionLabel, settingLabel } from "@/lib/settingLabels";
 import ProviderIcon from "./ProviderIcon";
@@ -208,7 +208,7 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const setParam = useFlow((s) => s.setParam);
   const patchNode = useFlow((s) => s.patchNode);
   const run = useFlow((s) => s.run);
-  const running = useFlow((s) => s.running);
+  const running = useRunning(id);
   const refsWired = useFlowStore((s) => s.edges.some((e) => e.target === id && e.targetHandle === "refs"));
   const endpoint = (refsWired ? model?.editEndpoint : model?.textEndpoint) ?? model?.textEndpoint ?? model?.editEndpoint ?? null;
   // The endpoint of the other mode, whose settings are listed too.
