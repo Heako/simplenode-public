@@ -117,11 +117,21 @@ fn stored(kind: KeyKind) -> Result<Option<String>> {
     Ok(keys()?.lock().unwrap().keys.get(kind.user()).cloned())
 }
 
+/// `FAL_KEY` from the environment, in dev builds only: a released app only
+/// ever uses the key its user declared.
+fn env_key() -> Option<String> {
+    if cfg!(debug_assertions) {
+        std::env::var("FAL_KEY").ok()
+    } else {
+        None
+    }
+}
+
 /// The saved key wins; `FAL_KEY` in the environment is a dev fallback.
 pub fn main_key() -> Result<String> {
     match stored(KeyKind::Main)? {
         Some(key) => Ok(key),
-        None => std::env::var("FAL_KEY").map_err(|_| AppError::MissingKey),
+        None => env_key().ok_or(AppError::MissingKey),
     }
 }
 
@@ -156,7 +166,7 @@ pub struct KeyStatus {
 pub fn key_status() -> Result<KeyStatus> {
     let main = if stored(KeyKind::Main)?.is_some() {
         Some("saved")
-    } else if std::env::var("FAL_KEY").is_ok() {
+    } else if env_key().is_some() {
         Some("env")
     } else {
         None

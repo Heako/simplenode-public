@@ -4,6 +4,26 @@ Application de bureau pour construire des workflows de génération IA sous form
 
 Construite avec **Tauri 2** (backend Rust) et **Next.js + React Flow** (interface).
 
+## Télécharger et installer (sans compétences techniques)
+
+1. **Téléchargez** le fichier `SimpleNode_x.y.z_universal.dmg` de la dernière version, sur la page [Releases](https://github.com/Heako/simplenode-public/releases/latest). Il fonctionne sur tous les Mac récents (puce Apple M1 à M4, ou Intel), avec macOS 11 ou plus récent.
+2. **Ouvrez** le fichier téléchargé, puis faites glisser l'icône **SimpleNode** sur le dossier **Applications**.
+3. **Lancez SimpleNode** depuis le dossier Applications (ou le Launchpad).
+
+**Au premier lancement, macOS affiche un avertissement**, car l'app n'est pas encore signée par Apple. C'est normal. Pour l'autoriser une fois pour toutes :
+
+- Cliquez sur **Terminé** (ne la mettez pas à la corbeille).
+- Ouvrez **Réglages Système → Confidentialité et sécurité**, descendez jusqu'au message « SimpleNode a été bloqué », puis cliquez sur **Ouvrir quand même** et confirmez avec votre mot de passe.
+- Relancez SimpleNode. L'avertissement n'apparaîtra plus.
+
+Si macOS indique que l'app « est endommagée », ouvrez l'app **Terminal**, collez cette ligne puis appuyez sur Entrée :
+
+```bash
+xattr -dr com.apple.quarantine /Applications/SimpleNode.app
+```
+
+**Au premier lancement, SimpleNode vous guide** pour créer votre compte [fal.ai](https://fal.ai), le service qui génère les images et vidéos, puis pour y ajouter un peu de crédit et coller votre clé. Chaque génération est facturée par fal.ai à l'unité (de quelques centimes pour une image à environ un euro pour une vidéo). Votre clé reste sur votre ordinateur.
+
 ## Fonctionnalités
 
 - **Canvas à nœuds** : glisser-déposer depuis la bibliothèque, clic droit pour ajouter un nœud, annuler / rétablir, liens colorés selon le type (texte, image, vidéo).
@@ -63,7 +83,7 @@ Au premier lancement :
 2. Collez votre clé fal.ai dans **Clé de génération**, puis cliquez sur **Tester**.
 3. Revenez à **Mes fichiers**, créez un **Nouveau fichier**, ajoutez des nœuds et lancez **Tout exécuter**.
 
-La clé est enregistrée dans un fichier privé de l'app (`keys.json` dans son dossier de configuration, lisible par votre compte uniquement), jamais dans les projets. Contrairement au trousseau macOS, il ne demande pas le mot de passe de session après chaque mise à jour de l'app. En développement, la variable d'environnement `FAL_KEY` est utilisée si aucune clé n'est enregistrée.
+La clé est enregistrée dans un fichier privé de l'app (`keys.json` dans son dossier de configuration, lisible par votre compte uniquement), jamais dans les projets. Contrairement au trousseau macOS, il ne demande pas le mot de passe de session après chaque mise à jour de l'app. En développement uniquement, la variable d'environnement `FAL_KEY` est utilisée si aucune clé n'est enregistrée ; l'app distribuée n'utilise que la clé déclarée par l'utilisateur.
 
 ### Voir ses dépenses
 
@@ -81,7 +101,16 @@ L'installeur est produit dans `src-tauri/target/release/bundle/` (`.app` et `.dm
 
 Copiez le `.dmg` de `src-tauri/target/release/bundle/dmg/` sur l'autre Mac et installez l'app comme n'importe quelle autre. Node, Rust et Xcode ne sont pas nécessaires.
 
-L'app n'est pas signée : au premier lancement, macOS la bloque. Faites clic droit → **Ouvrir**, ou allez dans Réglages Système → Confidentialité et sécurité → **Ouvrir quand même**.
+L'app n'est pas signée : au premier lancement, macOS la bloque. Voir [Télécharger et installer](#télécharger-et-installer-sans-compétences-techniques).
+
+Pour un installeur qui fonctionne sur les Mac Apple Silicon et Intel :
+
+```bash
+rustup target add x86_64-apple-darwin   # une seule fois
+RUSTFLAGS="--remap-path-prefix=$HOME=~" npm run tauri build -- --target universal-apple-darwin
+```
+
+Le `.dmg` est alors dans `src-tauri/target/universal-apple-darwin/release/bundle/dmg/`. `RUSTFLAGS` retire les chemins de votre dossier personnel du binaire. Arrêtez `npm run tauri dev` avant de compiler : les deux utilisent le dossier `.next`.
 
 ## Problème connu : erreur de linker sur macOS 27
 
