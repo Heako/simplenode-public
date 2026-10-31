@@ -2,7 +2,7 @@
 
 import { Copy, CopyPlus, Eraser, PencilLine, Play, Search, Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useFlow, useRunning, type PendingLink } from "@/lib/store";
+import { hasHistory, useFlow, useRunning, type PendingLink } from "@/lib/store";
 import { defaultParams, libraryItems, portsCompatible, portsFor, useModels, type LibraryItem, type PortType } from "@/lib/spec";
 import ProviderIcon from "./ProviderIcon";
 import { GROUP_ORDER, GROUP_TITLES, filterItems, itemIcon, usePlaceItem } from "./Library";
@@ -169,7 +169,10 @@ export function NodeMenu({ x, y, nodeId, onClose }: { x: number; y: number; node
   const duplicateNode = useFlow((s) => s.duplicateNode);
   const copyNodes = useFlow((s) => s.copyNodes);
   const purgeResults = useFlow((s) => s.purgeResults);
-  const isModel = useFlow((s) => s.nodes.find((n) => n.id === nodeId)?.data.kind === "model");
+  const isModel = useFlow((s) => {
+    const node = s.nodes.find((n) => n.id === nodeId);
+    return !!node && hasHistory(node);
+  });
   const hasResults = useFlow((s) => {
     const data = s.nodes.find((n) => n.id === nodeId)?.data;
     return !!data && (Object.keys(data.outputs).length > 0 || !!data.history?.length);

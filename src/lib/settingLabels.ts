@@ -52,6 +52,17 @@ const LABELS: Record<string, string> = {
   return_byteplus_urls: "URL BytePlus",
   model: "Modèle",
   detailed_analysis: "Analyse détaillée",
+  character_orientation: "Cadrage",
+  keep_original_sound: "Son d'origine",
+  enhance_realism: "Réalisme renforcé",
+  video_quality: "Qualité vidéo",
+  video_write_mode: "Encodage vidéo",
+  use_turbo: "Mode turbo",
+};
+
+/** Values whose meaning depends on the setting they belong to. */
+const KEYED_VALUES: Record<string, Record<string, string>> = {
+  character_orientation: { video: "Comme la vidéo", image: "Comme l'image" },
 };
 
 /** Technical options, kept out of the way in a folded "Avancé" section. */
@@ -76,6 +87,7 @@ const ADVANCED = new Set([
   "thinking_level",
   "sequential_image_generation",
   "num_frames",
+  "video_write_mode",
 ]);
 
 const IMAGE_SIZES: Record<string, string> = {
@@ -124,6 +136,7 @@ export function isAdvanced(key: string) {
 
 /** "portrait_4_3" -> "Portrait 3:4", "TURBO" -> "Turbo", "auto_2K" -> "Auto 2K"; ratios, sizes and numbers stay. */
 export function optionLabel(key: string, value: string) {
+  if (KEYED_VALUES[key]?.[value]) return KEYED_VALUES[key][value];
   if (IMAGE_SIZES[value]) return IMAGE_SIZES[value];
   if (/^auto_\d+K$/i.test(value)) return `Auto ${value.split("_")[1]}`;
   // Ratios (16:9), sizes (1K, 1080p), durations (8s), numbers: already readable.

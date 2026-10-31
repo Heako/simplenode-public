@@ -25,7 +25,13 @@ const PLATFORM_URL: &str = "https://api.fal.ai/v1";
 /// Max endpoint ids per pricing request, per fal's docs.
 const PRICING_BATCH: usize = 50;
 /// Endpoints used outside the registry (text helpers).
-const EXTRA_ENDPOINTS: &[(&str, &str)] = &[("Video Describer", "fal-ai/video-understanding"), ("Seedance 2.5 Draft → 1080p", "bytedance/seedance-2.5/draft/complete")];
+const EXTRA_ENDPOINTS: &[(&str, &str)] = &[
+    ("Video Describer", "fal-ai/video-understanding"),
+    ("Seedance 2.5 Draft → 1080p", "bytedance/seedance-2.5/draft/complete"),
+    ("Recast : découpe de la vidéo", crate::fal::TRIM_VIDEO_ENDPOINT),
+    ("Recast : assemblage", crate::fal::MERGE_VIDEOS_ENDPOINT),
+    ("Ajouter le son", crate::fal::MERGE_AUDIO_VIDEO_ENDPOINT),
+];
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
@@ -218,6 +224,7 @@ fn category_name(c: Category) -> &'static str {
         Category::Image => "image",
         Category::Video => "video",
         Category::Llm => "llm",
+        Category::Audio => "audio",
     }
 }
 

@@ -3,11 +3,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Background, BackgroundVariant, MiniMap, ReactFlow, ReactFlowProvider, useReactFlow, useViewport } from "@xyflow/react";
-import { AlignHorizontalDistributeCenter, Eraser, Hand, MousePointer2, Play, Redo2, Trash2, Undo2 } from "lucide-react";
+import { AlignHorizontalDistributeCenter, Eraser, Hand, MousePointer2, Play, Redo2, Square, Trash2, Undo2 } from "lucide-react";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
-import { useFlow, type NodeStatusEvent, type PendingLink } from "@/lib/store";
+import { hasHistory, useFlow, type NodeStatusEvent, type PendingLink } from "@/lib/store";
 import { useModels } from "@/lib/spec";
 import { persistableNodes, saveProject, thumbnailOf } from "@/lib/projects";
 import { AddNodeMenu, NodeMenu, type MenuState } from "./ContextMenus";
@@ -29,10 +29,12 @@ function mediaOf(path: string): "image" | "video" | "audio" | null {
 function RunCard() {
   const run = useFlow((s) => s.run);
   const running = useFlow((s) => s.runs.includes("*"));
+  const busy = useFlow((s) => s.nodes.some((n) => n.data.status === "running"));
+  const stop = useFlow((s) => s.stop);
   const clear = useFlow((s) => s.clear);
   const purgeResults = useFlow((s) => s.purgeResults);
   const setNotice = useFlow((s) => s.setNotice);
-  const scoped = useFlow((s) => s.nodes.some((n) => n.selected && n.data.kind === "model"));
+  const scoped = useFlow((s) => s.nodes.some((n) => n.selected && hasHistory(n)));
 
   function purge() {
     const count = purgeResults();
@@ -59,9 +61,19 @@ function RunCard() {
       >
         <Eraser size={13} />
       </button>
+      {busy && (
+        <button
+          className="flex items-center gap-1.5 rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/10"
+          title="Arrête tous les nœuds en cours et annule leurs requêtes fal"
+          onClick={() => stop()}
+        >
+          <Square size={11} fill="currentColor" /> Tout arrêter
+        </button>
+      )}
       <button
         className="flex items-center gap-1.5 rounded-lg bg-fg px-3 py-1.5 text-xs font-medium text-bg disabled:opacity-50"
         disabled={running}
+        title="Exécute les nœuds qui n'ont pas encore de résultat ; les nœuds payants déjà rendus ne sont pas relancés"
         onClick={() => run()}
       >
         <Play size={12} fill="currentColor" />
@@ -232,7 +244,7 @@ function Canvas() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const t = e.target as HTMLElement;
-      if (t.closest("input, textarea, select, [contenteditable=true]")) return;
+      if (t.closest("input, textarea, select, [contenteditable=true], .nokey")) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
         e.preventDefault();
         if (e.shiftKey) redo();

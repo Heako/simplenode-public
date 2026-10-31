@@ -1,10 +1,12 @@
 mod account;
 mod angles;
+mod compose;
 mod error;
 mod fal;
 mod graph;
 mod models;
 mod projects;
+mod recast;
 mod schema;
 mod storage;
 
@@ -70,6 +72,11 @@ fn camera_shots() -> &'static [angles::Shot] {
     angles::SHOTS
 }
 
+#[tauri::command]
+fn recast_modes() -> &'static [recast::Mode] {
+    recast::MODES
+}
+
 /// Every setting of a fal endpoint, from its published schema.
 #[tauri::command]
 async fn model_settings(state: State<'_, AppState>, endpoint: String) -> Result<Vec<schema::Setting>> {
@@ -119,6 +126,12 @@ async fn run_graph(
     graph::run(&app, &fal, &state.http, nodes, edges, target).await
 }
 
+/// Stops the given nodes, or all running ones; their fal requests are cancelled.
+#[tauri::command]
+fn stop_nodes(ids: Option<Vec<String>>) {
+    graph::stop(ids.as_deref());
+}
+
 /// Renders a Seedance draft in 1080p and stores it locally.
 #[tauri::command]
 async fn finalize_draft(app: AppHandle, state: State<'_, AppState>, draft_id: String) -> Result<String> {
@@ -151,6 +164,7 @@ pub fn run() {
             reveal_media_folder,
             list_models,
             camera_shots,
+            recast_modes,
             model_settings,
             list_projects,
             load_project,
@@ -159,6 +173,7 @@ pub fn run() {
             import_image,
             save_media,
             run_graph,
+            stop_nodes,
             finalize_draft
         ])
         .run(tauri::generate_context!())

@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::{json, Map, Value};
 
 use crate::error::{AppError, Result};
-use crate::models::{Category, ModelDef, Mode, ParamKind, RefField};
+use crate::models::{self, Category, ModelDef, Mode, ParamKind, RefField};
 use crate::schema;
 use crate::storage;
 
@@ -20,6 +20,9 @@ const QUEUE_URL: &str = "https://queue.fal.run";
 const STORAGE_INITIATE_URL: &str = "https://rest.alpha.fal.ai/storage/upload/initiate?storage_type=fal-cdn-v3";
 const VIDEO_UNDERSTANDING_ENDPOINT: &str = "fal-ai/video-understanding";
 const SEEDANCE_DRAFT_COMPLETE_ENDPOINT: &str = "bytedance/seedance-2.5/draft/complete";
+pub const TRIM_VIDEO_ENDPOINT: &str = "fal-ai/workflow-utilities/trim-video";
+pub const MERGE_VIDEOS_ENDPOINT: &str = "fal-ai/ffmpeg-api/merge-videos";
+pub const MERGE_AUDIO_VIDEO_ENDPOINT: &str = "fal-ai/ffmpeg-api/merge-audio-video";
 
 /// What one model call sends besides the model's own params.
 pub struct ModelCall<'a> {
@@ -52,6 +55,27 @@ const TIMEOUT: Duration = Duration::from_secs(600);
 struct Submitted {
     status_url: String,
     response_url: String,
+    #[serde(default)]
+    cancel_url: Option<String>,
+}
+
+/// Cancels a fal request whose wait is dropped before it completes: the node
+/// was stopped. Without it fal would finish the job, and bill it, unseen.
+struct CancelOnDrop {
+    http: Client,
+    auth: String,
+    url: Option<String>,
+}
+
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        if let Some(url) = self.url.take() {
+            let (http, auth) = (self.http.clone(), std::mem::take(&mut self.auth));
+            tauri::async_runtime::spawn(async move {
+                let _ = http.put(url).header(AUTHORIZATION, auth).send().await;
+            });
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -126,6 +150,7 @@ impl Fal {
             .send()
             .await?;
         let job: Submitted = check(res).await?.json().await?;
+        let mut cancel = CancelOnDrop { http: self.http.clone(), auth: self.auth(), url: job.cancel_url.clone() };
 
         let started = Instant::now();
         loop {
@@ -139,6 +164,7 @@ impl Fal {
                 break;
             }
         }
+        cancel.url = None;
 
         // A failed job surfaces its error on the result endpoint.
         let res = self.http.get(&job.response_url).header(AUTHORIZATION, self.auth()).send().await?;
@@ -167,6 +193,28 @@ impl Fal {
     pub async fn complete_draft(&self, draft_id: &str) -> Result<String> {
         let input = json!({ "draft_id": draft_id, "resolution": "1080p" });
         let out = self.subscribe(SEEDANCE_DRAFT_COMPLETE_ENDPOINT, input).await?;
+        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))
+    }
+
+    /// Cuts `duration` seconds from `start` out of a hosted video. Returns the
+    /// piece's URL and the source's full length.
+    pub async fn trim_video(&self, video_url: &str, start: f64, duration: f64) -> Result<(String, f64)> {
+        let input = json!({ "video_url": video_url, "start_time": start, "duration": duration });
+        let out = self.subscribe(TRIM_VIDEO_ENDPOINT, input).await?;
+        let url = out["video"]["url"].as_str().ok_or_else(|| AppError::Fal("réponse vide".into()))?;
+        Ok((url.to_owned(), out["original_duration"].as_f64().unwrap_or_default()))
+    }
+
+    /// Joins hosted videos end to end, in order. Returns the result's URL.
+    /// Puts an audio track on a hosted video, from `offset` seconds. Returns the video URL.
+    pub async fn merge_audio_video(&self, video_url: &str, audio_url: &str, offset: f64) -> Result<String> {
+        let input = json!({ "video_url": video_url, "audio_url": audio_url, "start_offset": offset });
+        let out = self.subscribe(MERGE_AUDIO_VIDEO_ENDPOINT, input).await?;
+        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))
+    }
+
+    pub async fn merge_videos(&self, urls: &[String]) -> Result<String> {
+        let out = self.subscribe(MERGE_VIDEOS_ENDPOINT, json!({ "video_urls": urls })).await?;
         out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))
     }
 
@@ -201,7 +249,10 @@ impl Fal {
                 input.entry(key).or_insert(value);
             }
         }
-        input.insert("prompt".into(), json!(prompt));
+        // Empty only where the prompt is optional (recast models).
+        if !prompt.trim().is_empty() {
+            input.insert(models::prompt_key(def).into(), json!(prompt));
+        }
         if !system.is_empty() {
             input.insert("system_prompt".into(), json!(system));
         }
@@ -223,6 +274,7 @@ impl Fal {
                 RefField::Urls => input.insert("image_urls".into(), json!(refs)),
                 RefField::Url => input.insert("image_url".into(), json!(refs[0])),
                 RefField::StartImage => input.insert("start_image_url".into(), json!(refs[0])),
+                RefField::ReferenceUrls => input.insert("reference_image_urls".into(), json!(refs)),
             };
         }
         match (end_frame, def.end_field) {
@@ -241,6 +293,7 @@ impl Fal {
             Category::Image => out["images"][0]["url"].as_str(),
             Category::Video => out["video"]["url"].as_str(),
             Category::Llm => out["output"].as_str(),
+            Category::Audio => out["audio"]["url"].as_str(),
         };
         let value = value.map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))?;
         let draft_id = out["draft_id"].as_str().map(str::to_owned);

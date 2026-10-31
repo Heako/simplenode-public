@@ -3,9 +3,12 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import {
   ArchiveRestore,
+  ArrowRight,
   Copy,
+  Drama,
   FolderOpen,
   LayoutGrid,
+  LayoutTemplate,
   List,
   MoreHorizontal,
   PencilLine,
@@ -25,16 +28,71 @@ import {
   saveProject,
   type ProjectMeta,
 } from "@/lib/projects";
+import { useModels } from "@/lib/spec";
+import { WORKFLOWS, type Workflow as WorkflowDef } from "@/lib/workflows";
 import Settings from "./Settings";
 
-type Tab = "files" | "trash" | "settings";
+type Tab = "files" | "workflows" | "trash" | "settings";
 type View = "grid" | "list";
 
 const TITLES: Record<Tab, string> = {
   files: "Mon espace de travail",
+  workflows: "Workflows",
   trash: "Corbeille",
   settings: "Réglages",
 };
+
+/** Ready-made graphs; picking one creates a file that starts from it. */
+/** `compact`: the short version shown above the files, with a link to the full tab. */
+function Workflows({ onPick, compact, onMore }: { onPick: (workflow: WorkflowDef) => void; compact?: boolean; onMore?: () => void }) {
+  // Workflows read model defaults from the registry, loaded at startup.
+  const ready = useModels((s) => s.recastModes.length > 0);
+  return (
+    <>
+      {compact ? (
+        <div className="mt-8 flex items-center gap-3">
+          <h2 className="mr-auto text-[15px] font-medium">Workflows</h2>
+          <button className="flex items-center gap-1 text-[12px] text-muted hover:text-fg" onClick={onMore}>
+            Tout voir <ArrowRight size={13} />
+          </button>
+        </div>
+      ) : (
+        <p className="mt-2 text-[13px] text-muted">Un workflow crée un nouveau fichier déjà relié : il ne reste qu&apos;à importer vos médias et exécuter.</p>
+      )}
+      <div className={`${compact ? "mt-4" : "mt-6"} grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5`}>
+        {WORKFLOWS.map((w) => (
+          <button
+            key={w.id}
+            disabled={!ready}
+            onClick={() => onPick(w)}
+            className="group flex flex-col rounded-xl border border-line bg-panel p-5 text-left hover:border-[#4a4a52] disabled:opacity-50"
+          >
+            <div className="flex items-center gap-2.5">
+              <div className="grid h-8 w-8 place-items-center rounded-lg bg-panel-2">
+                <Drama size={16} className="text-accent" />
+              </div>
+              <span className="text-[14px] font-medium">{w.title}</span>
+            </div>
+            <p className="mt-3 text-[12px] leading-relaxed text-muted">{w.description}</p>
+            {!compact && (
+              <ol className="mt-3 space-y-1 text-[12px] text-muted">
+                {w.steps.map((step, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-fg tabular-nums">{i + 1}.</span>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            )}
+            <span className="mt-4 flex items-center gap-1.5 self-end text-[12px] text-fg opacity-70 group-hover:opacity-100">
+              Utiliser <ArrowRight size={13} />
+            </span>
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
 
 const rtf = new Intl.RelativeTimeFormat("fr", { numeric: "auto" });
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
@@ -178,8 +236,9 @@ export default function Home() {
     }
   }
 
-  async function create() {
-    const project = { id: newProjectId(), title: "Sans titre", updatedAt: 0, thumbnail: null, trashed: false, nodes: [], edges: [] };
+  async function create(workflow?: WorkflowDef) {
+    const graph = workflow?.build() ?? { nodes: [], edges: [] };
+    const project = { id: newProjectId(), title: workflow?.title ?? "Sans titre", updatedAt: 0, thumbnail: null, trashed: false, ...graph };
     try {
       await saveProject(project);
       openProject(project);
@@ -263,6 +322,7 @@ export default function Home() {
         </button>
         <nav className="mt-4 space-y-0.5">
           {navItem("files", "Mes fichiers", FolderOpen)}
+          {navItem("workflows", "Workflows", LayoutTemplate)}
           {navItem("trash", "Corbeille", Trash2)}
         </nav>
         <div className="mt-auto">{navItem("settings", "Réglages", SettingsIcon)}</div>
@@ -281,8 +341,11 @@ export default function Home() {
 
           {tab === "settings" ? (
             <Settings />
+          ) : tab === "workflows" ? (
+            <Workflows onPick={(w) => create(w)} />
           ) : (
             <>
+              {tab === "files" && !query && <Workflows compact onPick={(w) => create(w)} onMore={() => setTab("workflows")} />}
               <div className="mt-8 flex items-center gap-3">
                 <h2 className="mr-auto text-[15px] font-medium">{tab === "files" ? "Mes fichiers" : "Fichiers supprimés"}</h2>
                 <div className="flex w-64 items-center gap-2 rounded-lg bg-panel px-3 py-1.5 focus-within:ring-1 focus-within:ring-accent">

@@ -10,6 +10,7 @@ pub enum Category {
     Image,
     Video,
     Llm,
+    Audio,
 }
 
 /// How an edit endpoint receives reference images.
@@ -22,6 +23,8 @@ pub enum RefField {
     Url,
     /// `start_image_url: ".."` (Kling 3 image-to-video)
     StartImage,
+    /// `reference_image_urls: [..]` (H3 Max Recast, one photo per person)
+    ReferenceUrls,
 }
 
 #[derive(Serialize, Clone, Copy, PartialEq, Debug)]
@@ -647,13 +650,186 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
     },
 ];
 
-pub fn find(id: &str) -> Option<&'static ModelDef> {
-    MODELS.iter().chain(VIDEO_MODELS).find(|m| m.id == id)
+/// Video-to-video models of the Recast node (see `recast`): a source video
+/// plus character images, no text endpoint. The source video is sent by the
+/// node itself, so it isn't declared as a media input.
+pub static RECAST_MODELS: &[ModelDef] = &[
+    ModelDef {
+        id: "h3-max-recast",
+        label: "H3 Max Recast",
+        provider: "MiniMax",
+        category: Category::Video,
+        text_endpoint: None,
+        edit_endpoint: Some("minimax/h3-max/recast"),
+        ref_field: RefField::ReferenceUrls,
+        max_refs: 4,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[
+            select("resolution", "Résolution", &["768P", "1080P"], "1080P"),
+            toggle("enhance_realism", "Réalisme renforcé", "false"),
+        ],
+    },
+    ModelDef {
+        id: "wan-2.2-animate-replace",
+        label: "Wan 2.2 Animate Replace",
+        provider: "Alibaba",
+        category: Category::Video,
+        text_endpoint: None,
+        edit_endpoint: Some("fal-ai/wan/v2.2-14b/animate/replace"),
+        ref_field: RefField::Url,
+        max_refs: 1,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[select("resolution", "Résolution", &["480p", "580p", "720p"], "720p")],
+    },
+    ModelDef {
+        id: "kling-3-pro-motion",
+        label: "Kling 3 Pro Motion Control",
+        provider: "Kling",
+        category: Category::Video,
+        text_endpoint: None,
+        edit_endpoint: Some("fal-ai/kling-video/v3/pro/motion-control"),
+        ref_field: RefField::Url,
+        max_refs: 1,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[
+            // "video": framing follows the source (up to 30 s); "image": the character's (up to 10 s).
+            select("character_orientation", "Cadrage", &["video", "image"], "video"),
+            toggle("keep_original_sound", "Son d'origine", "true"),
+        ],
+    },
+    ModelDef {
+        id: "kling-3-standard-motion",
+        label: "Kling 3 Standard Motion Control",
+        provider: "Kling",
+        category: Category::Video,
+        text_endpoint: None,
+        edit_endpoint: Some("fal-ai/kling-video/v3/standard/motion-control"),
+        ref_field: RefField::Url,
+        max_refs: 1,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[
+            select("character_orientation", "Cadrage", &["video", "image"], "video"),
+            toggle("keep_original_sound", "Son d'origine", "true"),
+        ],
+    },
+];
+
+/// Music and sound effects. Text to audio, except MMAudio which gives a
+/// video its own sound and returns the video with it.
+pub static AUDIO_MODELS: &[ModelDef] = &[
+    ModelDef {
+        id: "elevenlabs-music",
+        label: "ElevenLabs Music",
+        provider: "ElevenLabs",
+        category: Category::Audio,
+        text_endpoint: Some("fal-ai/elevenlabs/music"),
+        edit_endpoint: None,
+        ref_field: RefField::Url,
+        max_refs: 0,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[toggle("force_instrumental", "Instrumental", "false")],
+    },
+    ModelDef {
+        id: "stable-audio-2.5",
+        label: "Stable Audio 2.5",
+        provider: "Stability AI",
+        category: Category::Audio,
+        text_endpoint: Some("fal-ai/stable-audio-25/text-to-audio"),
+        edit_endpoint: None,
+        ref_field: RefField::Url,
+        max_refs: 0,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[int("seconds_total", "Durée (s)", &["10", "30", "60", "120", "190"], "30")],
+    },
+    ModelDef {
+        id: "elevenlabs-sfx-v2",
+        label: "ElevenLabs Sound Effects",
+        provider: "ElevenLabs",
+        category: Category::Audio,
+        text_endpoint: Some("fal-ai/elevenlabs/sound-effects/v2"),
+        edit_endpoint: None,
+        ref_field: RefField::Url,
+        max_refs: 0,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[toggle("loop", "En boucle", "false")],
+    },
+    ModelDef {
+        id: "mmaudio-v2-text",
+        label: "MMAudio (bruitages)",
+        provider: "MMAudio",
+        category: Category::Audio,
+        text_endpoint: Some("fal-ai/mmaudio-v2/text-to-audio"),
+        edit_endpoint: None,
+        ref_field: RefField::Url,
+        max_refs: 0,
+        end_field: None,
+        draft: false,
+        negative: true,
+        refs_label: None,
+        media: &[],
+        params: &[int("duration", "Durée (s)", &["4", "8", "15", "30"], "8")],
+    },
+    ModelDef {
+        id: "mmaudio-v2-video",
+        label: "MMAudio (son d'une vidéo)",
+        provider: "MMAudio",
+        category: Category::Video,
+        text_endpoint: Some("fal-ai/mmaudio-v2"),
+        edit_endpoint: None,
+        ref_field: RefField::Url,
+        max_refs: 0,
+        end_field: None,
+        draft: false,
+        negative: true,
+        refs_label: None,
+        media: &[media("video_url", "Vidéo", MediaKind::Video, false, Mode::Both)],
+        params: &[int("duration", "Durée (s)", &["4", "8", "15", "30"], "8")],
+    },
+];
+
+/// fal input key of the prompt: "prompt" except where the endpoint names it otherwise.
+pub fn prompt_key(def: &ModelDef) -> &'static str {
+    match def.id {
+        "elevenlabs-sfx-v2" => "text",
+        _ => "prompt",
+    }
 }
 
-/// Image, LLM and video models, in library order.
+pub fn find(id: &str) -> Option<&'static ModelDef> {
+    all().find(|m| m.id == id)
+}
+
+/// Image, LLM, video, recast and audio models, in library order.
 pub fn all() -> impl Iterator<Item = &'static ModelDef> {
-    MODELS.iter().chain(VIDEO_MODELS)
+    MODELS.iter().chain(VIDEO_MODELS).chain(RECAST_MODELS).chain(AUDIO_MODELS)
 }
 
 #[cfg(test)]

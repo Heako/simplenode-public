@@ -22,6 +22,8 @@ Si macOS indique que l'app « est endommagée », ouvrez l'app **Terminal**, col
 xattr -dr com.apple.quarantine /Applications/SimpleNode.app
 ```
 
+**Pour le Compositeur**, installez aussi ffmpeg, une seule fois : installez [Homebrew](https://brew.sh), puis tapez `brew install ffmpeg` dans le Terminal. Le reste de l'app fonctionne sans.
+
 **Au premier lancement, SimpleNode vous guide** pour créer votre compte [fal.ai](https://fal.ai), le service qui génère les images et vidéos, puis pour y ajouter un peu de crédit et coller votre clé. Chaque génération est facturée par fal.ai à l'unité (de quelques centimes pour une image à environ un euro pour une vidéo). Votre clé reste sur votre ordinateur.
 
 ## Fonctionnalités
@@ -30,14 +32,19 @@ xattr -dr com.apple.quarantine /Applications/SimpleNode.app
 - **Nœuds** : Prompt, Import (image ou vidéo), Preview, Router, Prompt Concatenator, Crop, Prompt Enhancer, Image Describer, Video Describer, LLM.
 - **Modèles d'image** : Nano Banana Pro / 2, Seedream 5.0 Lite / 4.5, GPT Image 2, FLUX.2 [pro], FLUX.1 Kontext [pro], Qwen Image Max, Recraft V4 Pro, Ideogram V3, FLUX.1 [schnell]. Avec des images reliées en référence, l'app utilise la version « édition » du modèle.
 - **Modèles vidéo** : Kling 4 / 3 Pro / 2.5 Turbo Pro, MiniMax H3 / H3 Max, Seedance 2.5 / 2.0 / 1.0 Pro, Veo 3.1 / 3.1 Fast, Hailuo 02, Wan 2.5, LTX-2. Image de départ et de fin selon le modèle.
+- **Recast** : à partir d'une vidéo source et d'une image de personnage, deux modes. **Remplacer** garde la scène, la lumière, la caméra et le son, et remplace les personnes par vos personnages (H3 Max Recast, jusqu'à 4 personnages ; Wan 2.2 Animate Replace). **Mouvement** anime votre personnage, dans son propre décor, avec les gestes et la caméra de la vidéo (Kling 3 Motion Control Pro / Standard).
+- **Musique et son** : musique (ElevenLabs Music, Stable Audio 2.5), bruitages (ElevenLabs Sound Effects, MMAudio), son généré pour une vidéo (MMAudio), et « Ajouter le son » pour poser une piste sur une vidéo.
+- **Compositeur** : superpose images, vidéos et sons en calques, dans un éditeur plein écran (position, taille, opacité, volume, fondus, boucle, ordre). En mode timeline, chaque calque a son début et sa durée, et « Enchaîner bout à bout » monte les plans à la suite. L'export se fait sur votre ordinateur, gratuitement ; il demande [ffmpeg](https://ffmpeg.org) (voir ci-dessous).
+- **Workflows** : depuis l'accueil, crée un fichier déjà relié (vidéo source → Recast ← personnage) ; il ne reste qu'à importer ses médias et exécuter.
 - **Seedance 2.5 Draft** : génère un brouillon 480p peu coûteux, puis le finalise en 1080p d'un clic (brouillon valable 7 jours chez fal).
-- **Exécution** : « Tout exécuter » ou exécution d'un seul nœud. Les résultats déjà générés en amont sont réutilisés, pour ne pas payer deux fois.
+- **Exécution** : « Tout exécuter » ou exécution d'un seul nœud, et bouton Arrêter. Un nœud payant qui a déjà un résultat n'est jamais relancé par « Tout exécuter », pour ne pas payer deux fois ; le coût estimé s'affiche avant de lancer.
 - **Projets** : page d'accueil avec vos fichiers, miniatures, corbeille, sauvegarde automatique.
 - **Réglages** : clé fal.ai, tarif de chaque modèle, dépenses réelles par modèle, gestion du stockage local.
 
 ## Prérequis
 
 - **Node.js** 20 ou plus récent, et npm
+- **ffmpeg** et ffprobe, pour le Compositeur (`brew install ffmpeg`)
 - **Rust**, toolchain stable récente (testé avec 1.90) : <https://rustup.rs>
 - **macOS** : Xcode ou les Command Line Tools
 - **Windows / Linux** : les [prérequis système de Tauri](https://v2.tauri.app/start/prerequisites/)
@@ -161,15 +168,19 @@ src/                      Interface (Next.js en export statique)
     Library.tsx           Bibliothèque de nœuds (panneau gauche)
     ContextMenus.tsx      Menus du clic droit
     nodes.tsx             Rendu de chaque type de nœud
+    CompositorEditor.tsx  Éditeur plein écran du Compositeur
     ProviderIcon.tsx      Logos des fournisseurs
   lib/
     spec.ts               Types de ports, nœuds, entrées/sorties
     store.ts              État du graphe (Zustand), historique
     projects.ts           Lecture / écriture des projets
+    cost.ts               Coût à la seconde des modèles vidéo → vidéo
 
 src-tauri/src/            Backend Rust
   models.rs               Registre des modèles fal (source de vérité)
   graph.rs                Exécution du graphe
+  recast.rs               Recast : modes, découpage en segments
+  compose.rs              Compositeur : rendu des calques avec ffmpeg
   fal.rs                  Client fal : file d'attente, upload, brouillons
   account.rs              Clés (fichier privé), tarifs, dépenses
   projects.rs             Fichiers projets

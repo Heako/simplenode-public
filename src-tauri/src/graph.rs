@@ -9,12 +9,14 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use futures::future::try_join_all;
+use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::watch;
 
 use crate::angles;
 use crate::error::{AppError, Result};
 use crate::fal::{Fal, ModelCall};
 use crate::models::{self, Category, MediaKind};
+use crate::{compose, recast};
 use crate::storage::{self, CropSpec, View};
 
 pub type Ports = HashMap<String, String>;
@@ -29,12 +31,29 @@ fn in_flight() -> &'static Mutex<HashMap<String, watch::Receiver<Outcome>>> {
     IN_FLIGHT.get_or_init(Default::default)
 }
 
-/// Frees a node's in-flight slot however its execution ends.
+/// Stop signals of the nodes being executed, keyed by id.
+fn stops() -> &'static Mutex<HashMap<String, watch::Sender<bool>>> {
+    static STOPS: OnceLock<Mutex<HashMap<String, watch::Sender<bool>>>> = OnceLock::new();
+    STOPS.get_or_init(Default::default)
+}
+
+/// Stops the given nodes, or every executing one. Their fal requests are
+/// cancelled; what they had already produced is kept.
+pub fn stop(ids: Option<&[String]>) {
+    for (id, tx) in stops().lock().unwrap().iter() {
+        if ids.map_or(true, |ids| ids.contains(id)) {
+            tx.send_replace(true);
+        }
+    }
+}
+
+/// Frees a node's in-flight slot and stop signal however its execution ends.
 struct Claim(String);
 
 impl Drop for Claim {
     fn drop(&mut self) {
         in_flight().lock().unwrap().remove(&self.0);
+        stops().lock().unwrap().remove(&self.0);
     }
 }
 /// Input ports can take several edges (e.g. multiple reference images).
@@ -71,7 +90,7 @@ struct NodeEvent<'a> {
 
 /// Nodes that call fal (and cost money) are not re-run when their output is cached.
 fn is_remote(kind: &str) -> bool {
-    matches!(kind, "model" | "enhancer" | "describer" | "videoDescriber" | "angles")
+    matches!(kind, "model" | "enhancer" | "describer" | "videoDescriber" | "angles" | "recast" | "addAudio")
 }
 
 /// Upstream node ids of `id`, including `id` itself.
@@ -199,6 +218,27 @@ fn crop_spec(node: &GraphNode) -> Result<CropSpec> {
             Ok(CropSpec::Aspect(a / b))
         }
     }
+}
+
+/// One segment's render, tagged with its index (segments finish in any order).
+/// Joins a recast's segments, in order, once every one is ready, so the
+/// Preview node always shows the whole video. None while one is missing: it
+/// is to be redone first. The segments stay on the node either way.
+async fn assemble(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &GraphNode, pieces: &[recast::Piece]) -> Result<Option<String>> {
+    if pieces.iter().any(|p| p.video.is_empty()) {
+        return Ok(None);
+    }
+    // Shown while the merge runs, and kept if it fails.
+    let partial = Ports::from([("pieces".to_owned(), recast::encode_pieces(pieces))]);
+    app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&partial), error: None })?;
+    let uploads = pieces.iter().map(|p| async { fal.upload(&storage::owned_path(app, &p.video)?).await });
+    let urls = try_join_all(uploads).await?;
+    let url = fal.merge_videos(&urls).await?;
+    Ok(Some(storage::download(app, http, &url).await?.to_string_lossy().into_owned()))
+}
+
+async fn render_piece(job: &recast::Job<'_>, index: usize, url: &str) -> (usize, Result<String>) {
+    (index, job.render(url).await)
 }
 
 async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &GraphNode, inputs: &Inputs) -> Result<Ports> {
@@ -350,6 +390,108 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             let text = fal.describe_video(&url, question, param(node, "detailed") == "true").await?;
             out.insert("text".into(), text);
         }
+        "recast" => {
+            let def = recast::model(param(node, "mode"), param(node, "modelId"))
+                .ok_or_else(|| AppError::Invalid("Choisissez un modèle de ce mode".into()))?;
+            let characters = inputs.get("characters").map(Vec::as_slice).unwrap_or_default();
+            if characters.is_empty() {
+                return Err(AppError::Invalid("Reliez au moins une image de personnage".into()));
+            }
+            // Refused rather than silently dropped: the extra person would just be missing.
+            if characters.len() > def.max_refs as usize {
+                let most = if def.max_refs == 1 { "un seul personnage".to_owned() } else { format!("{} personnages au plus", def.max_refs) };
+                return Err(AppError::Invalid(format!("{} accepte {most}", def.label)));
+            }
+            let refs = characters.iter().map(|c| storage::to_model_input(app, c)).collect::<Result<Vec<_>>>()?;
+            // Optional here: who becomes whom, what to keep or change.
+            let prompt = match inputs.get("prompt").filter(|v| !v.is_empty()) {
+                Some(texts) => texts.join("\n\n"),
+                None => param(node, "prompt").to_owned(),
+            };
+            let redo = param(node, "redo").parse::<usize>().ok();
+            // One seed for every segment of a run, so they render alike; a
+            // redo draws a new one, or it would give the same result again.
+            // Sent only where the endpoint's schema has a seed.
+            let mut params = node.params.clone();
+            if redo.is_none() && param(node, "x:seed").trim().is_empty() {
+                let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+                params.insert("x:seed".into(), (nanos % 1_000_000).to_string());
+            }
+            let job = recast::Job { fal, def, params: &params, refs: &refs, prompt: &prompt };
+
+            // Join the previous run's segments only: for those left unjoined,
+            // after a failed merge or by an older version of the app.
+            if param(node, "redo") == "join" {
+                let pieces = recast::decode_pieces(node.outputs.get("pieces").map(String::as_str).unwrap_or_default())?;
+                let video = assemble(app, fal, http, node, &pieces)
+                    .await?
+                    .ok_or_else(|| AppError::Invalid("Refaites d'abord les segments en erreur".into()))?;
+                out.insert("pieces".into(), recast::encode_pieces(&pieces));
+                out.insert("video".into(), video);
+                return Ok(out);
+            }
+
+            // Redo one segment of the previous run; the others are kept.
+            if let Some(index) = redo {
+                let mut pieces = recast::decode_pieces(node.outputs.get("pieces").map(String::as_str).unwrap_or_default())?;
+                let piece = pieces.get_mut(index).ok_or_else(|| AppError::Invalid(format!("Segment {} introuvable", index + 1)))?;
+                let url = job.render(&fal.upload(&storage::owned_path(app, &piece.source)?).await?).await?;
+                piece.video = storage::download(app, http, &url).await?.to_string_lossy().into_owned();
+                piece.error.clear();
+                out.insert("pieces".into(), recast::encode_pieces(&pieces));
+                if let Some(video) = assemble(app, fal, http, node, &pieces).await? {
+                    out.insert("video".into(), video);
+                }
+                return Ok(out);
+            }
+
+            let video = require(inputs, "video", "une vidéo source")?;
+            let (video_url, duration) = if video.starts_with("http") {
+                (video.to_owned(), None)
+            } else {
+                let path = storage::owned_path(app, video)?;
+                (fal.upload(&path).await?, storage::video_duration(&path))
+            };
+            match job.plan(&video_url, duration).await? {
+                recast::Plan::Whole(url) => {
+                    let path = storage::download(app, http, &url).await?;
+                    out.insert("video".into(), path.to_string_lossy().into_owned());
+                }
+                recast::Plan::Pieces(urls) => {
+                    // Local copies of the source segments, so one can be redone later.
+                    let mut pieces = Vec::with_capacity(urls.len());
+                    for url in &urls {
+                        let source = storage::download(app, http, url).await?;
+                        pieces.push(recast::Piece { source: source.to_string_lossy().into_owned(), ..Default::default() });
+                    }
+                    // Four calls at a time, as for camera angles. Each segment shows
+                    // up as it lands; a failed one doesn't lose the others.
+                    let mut queue = urls.iter().enumerate();
+                    let mut renders = FuturesUnordered::new();
+                    for (i, url) in queue.by_ref().take(4) {
+                        renders.push(render_piece(&job, i, url));
+                    }
+                    while let Some((i, result)) = renders.next().await {
+                        if let Some((next, url)) = queue.next() {
+                            renders.push(render_piece(&job, next, url));
+                        }
+                        match result {
+                            Ok(url) => match storage::download(app, http, &url).await {
+                                Ok(path) => pieces[i].video = path.to_string_lossy().into_owned(),
+                                Err(err) => pieces[i].error = err.to_string(),
+                            },
+                            Err(err) => pieces[i].error = err.to_string(),
+                        }
+                        let partial = Ports::from([("pieces".to_owned(), recast::encode_pieces(&pieces))]);
+                        app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&partial), error: None })?;
+                    }
+                    out.insert("pieces".into(), recast::encode_pieces(&pieces));
+                    if let Some(video) = assemble(app, fal, http, node, &pieces).await? {
+                        out.insert("video".into(), video);
+                    }
+                }
+            }
+        }
         "model" => {
             let def = models::find(param(node, "modelId"))
                 .ok_or_else(|| AppError::Invalid(format!("Modèle inconnu : {}", param(node, "modelId"))))?;
@@ -407,15 +549,52 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                 Category::Llm => {
                     out.insert("text".into(), value);
                 }
+                Category::Audio => {
+                    let path = storage::download(app, http, &value).await?;
+                    out.insert("audio".into(), path.to_string_lossy().into_owned());
+                }
             }
+        }
+        "addAudio" => {
+            let video = require(inputs, "video", "une vidéo")?;
+            let audio = require(inputs, "audio", "un son")?;
+            let host = |v: &str| {
+                let v = v.to_owned();
+                async move { if v.starts_with("http") { Ok(v) } else { fal.upload(&storage::owned_path(app, &v)?).await } }
+            };
+            let (video_url, audio_url) = futures::try_join!(host(video), host(audio))?;
+            let offset = param(node, "offset").parse::<f64>().unwrap_or(0.0).max(0.0);
+            let url = fal.merge_audio_video(&video_url, &audio_url, offset).await?;
+            out.insert("video".into(), storage::download(app, http, &url).await?.to_string_lossy().into_owned());
+        }
+        "compositor" => {
+            let count = param(node, "layers").parse::<usize>().unwrap_or(1).min(compose::MAX_LAYERS);
+            let mut places: HashMap<String, compose::Placement> = serde_json::from_str(param(node, "comp")).unwrap_or_default();
+            // Bottom first: the user's order, then any port it doesn't list
+            // in their own order (background, layer 1, 2…).
+            let order: Vec<String> = serde_json::from_str(param(node, "order")).unwrap_or_default();
+            let mut ports: Vec<String> = std::iter::once("bg".to_owned()).chain((1..=count).map(|i| format!("layer{i}"))).collect();
+            ports.sort_by_key(|p| order.iter().position(|o| o == p).unwrap_or(usize::MAX));
+            let layers: Vec<compose::Layer> = ports
+                .into_iter()
+                .filter_map(|port| {
+                    let value = first(inputs, &port)?.to_owned();
+                    Some(compose::Layer { value, place: places.remove(&port).unwrap_or_default(), cover: port == "bg" })
+                })
+                .collect();
+            let size = |key: &str| param(node, key).parse::<u32>().ok().filter(|v| *v > 0);
+            let canvas = compose::Canvas { width: size("width"), height: size("height"), timeline: param(node, "timeline") == "true" };
+            let path = compose::render(app, &canvas, &layers).await?;
+            out.insert("media".into(), path.to_string_lossy().into_owned());
         }
         other => return Err(AppError::Invalid(format!("Nœud inconnu : {other}"))),
     }
     Ok(out)
 }
 
-/// Without a target, runs every node. With a target, runs it plus any model
-/// ancestor lacking cached outputs, so re-running never re-bills upstream work.
+/// Without a target, runs every node; with one, the target and its ancestors.
+/// Either way a paid node that already has a result is skipped, unless it is
+/// the target itself: re-running never re-bills work that is already done.
 pub async fn run(
     app: &AppHandle,
     fal: &Fal,
@@ -430,11 +609,12 @@ pub async fn run(
     };
     let mut outputs: HashMap<String, Ports> = nodes.iter().map(|n| (n.id.clone(), n.outputs.clone())).collect();
     let mut failed = HashSet::new();
+    let mut stopped = HashSet::new();
 
     for id in topo_sort(&nodes, &subset, &edges) {
         let node = nodes.iter().find(|n| n.id == id).unwrap();
         let cached = !outputs[&id].is_empty();
-        if target.as_deref().is_some_and(|t| t != id) && cached && is_remote(&node.kind) {
+        if target.as_deref() != Some(id.as_str()) && cached && is_remote(&node.kind) {
             continue;
         }
         let emit = |status: &str, outs: Option<&Ports>, error: Option<String>| {
@@ -442,6 +622,12 @@ pub async fn run(
         };
 
         let incoming: Vec<_> = edges.iter().filter(|e| e.target == id).collect();
+        // Downstream of a stopped node: not run, and not an error either.
+        if incoming.iter().any(|e| stopped.contains(&e.source)) {
+            stopped.insert(id.clone());
+            emit("idle", None, None)?;
+            continue;
+        }
         if incoming.iter().any(|e| failed.contains(&e.source)) {
             failed.insert(id.clone());
             emit("error", None, Some("Un nœud en amont a échoué".into()))?;
@@ -482,10 +668,23 @@ pub async fn run(
                 continue;
             }
         };
+        let (stop_tx, mut stop_rx) = watch::channel(false);
+        stops().lock().unwrap().insert(id.clone(), stop_tx);
         let _claim = Claim(id.clone());
 
         emit("running", None, None)?;
-        let result = execute(app, fal, http, node, &inputs).await;
+        // Stopping drops the execution, which cancels its fal requests.
+        let work = std::pin::pin!(execute(app, fal, http, node, &inputs));
+        let stop = std::pin::pin!(stop_rx.wait_for(|s| *s));
+        let result = match futures::future::select(work, stop).await {
+            futures::future::Either::Left((result, _)) => result,
+            futures::future::Either::Right(_) => {
+                tx.send_replace(Some(Err("Arrêté".into())));
+                stopped.insert(id.clone());
+                emit("idle", None, None)?;
+                continue;
+            }
+        };
         tx.send_replace(Some(result.as_ref().map(Clone::clone).map_err(ToString::to_string)));
         match result {
             Ok(outs) => {

@@ -13,6 +13,7 @@ import {
   Clapperboard,
   Crop,
   Download,
+  Drama,
   Eye,
   FileText,
   Film,
@@ -28,19 +29,27 @@ import {
   Merge,
   Play,
   Plus,
+  RotateCcw,
   Sparkles,
   Split,
   Type,
   X,
   WandSparkles,
   type LucideIcon,
+  Square,
+  AudioLines,
+  Layers,
+  Minus,
+  Pencil,
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useFlow, useRunning, type FlowNode } from "@/lib/store";
 import ProviderIcon from "./ProviderIcon";
+import CompositorEditor, { type LayerInput } from "./CompositorEditor";
 import TemplateEditor, { type TemplateEditorHandle, type VarDisplay } from "./TemplateEditor";
-import { ANGLE_LAYOUTS, MAX_GRID, PORT_COLORS, varLabel, angleLayout, angleShots, findModel, gridSize, parseViews, listItems, llmOptions, portsFor, promptVars, useModels, type Port, type View } from "@/lib/spec";
+import { ANGLE_LAYOUTS, MAX_GRID, MAX_LAYERS, compositorLayers, PORT_COLORS, varLabel, angleLayout, angleShots, findModel, gridSize, parseViews, listItems, llmOptions, portsFor, promptVars, recastParams, recastPrompt, useModels, type Port, type View } from "@/lib/spec";
+import { optionLabel } from "@/lib/settingLabels";
 
 const field =
   "nodrag w-full rounded-lg border border-line bg-panel-2 px-2.5 py-2 text-xs text-fg outline-none placeholder:text-muted focus:border-accent";
@@ -94,6 +103,25 @@ function Handles({ ports, side, step = HANDLE_STEP }: { ports: Port[]; side: "in
   });
 }
 
+/** A node's run button, which turns into Stop while it runs. */
+function RunStop({ id, running, title }: { id: string; running: boolean; title: string }) {
+  const run = useFlow((s) => s.run);
+  const stop = useFlow((s) => s.stop);
+  return running ? (
+    <button
+      className="nodrag flex items-center gap-1.5 rounded-lg border border-red-500/50 px-3 py-1.5 text-[12px] text-red-300 hover:bg-red-500/10"
+      onClick={() => stop([id])}
+      title="Arrête ce nœud et annule sa requête fal"
+    >
+      <Square size={11} fill="currentColor" /> Arrêter
+    </button>
+  ) : (
+    <button className="nodrag flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:border-accent" onClick={() => run(id)} title={title}>
+      <ArrowRight size={13} /> Exécuter
+    </button>
+  );
+}
+
 function NodeShell({
   id,
   data,
@@ -104,6 +132,7 @@ function NodeShell({
   runnable = true,
   cardWidth = 300,
   handleStep = HANDLE_STEP,
+  fitHeight = false,
   modelId,
   llmModel,
   children,
@@ -119,9 +148,13 @@ function NodeShell({
   cardWidth?: number;
   /** Vertical spacing of ports; tighter for nodes with many outputs. */
   handleStep?: number;
+  /** Grows with its content even once resized by hand: for cards whose
+   *  content changes length (Recast's segments), which would overflow. */
+  fitHeight?: boolean;
   children: ReactNode;
 }) {
   const run = useFlow((s) => s.run);
+  const stop = useFlow((s) => s.stop);
   const running = useRunning(id);
   const checkpoint = useFlow((s) => s.checkpoint);
   const renaming = useFlow((s) => s.renamingId === id);
@@ -149,7 +182,13 @@ function NodeShell({
     <div
       data-resized={resized || undefined}
       className={`group group/card relative flex flex-col rounded-2xl border bg-panel shadow-2xl shadow-black/50 transition-colors ${ring}`}
-      style={resized ? { width: "100%", height: "100%", minHeight } : { width: cardWidth, minHeight }}
+      style={
+        !resized
+          ? { width: cardWidth, minHeight }
+          : fitHeight
+            ? { width: "100%", minHeight: `max(100%, ${minHeight}px)` }
+            : { width: "100%", height: "100%", minHeight }
+      }
     >
       <NodeResizer
         isVisible={selected}
@@ -185,16 +224,24 @@ function NodeShell({
           {subtitle && <div className="truncate text-[10px] text-muted">{subtitle}</div>}
         </div>
         {data.status === "running" && <Loader2 size={14} className="animate-spin text-accent" />}
-        {runnable && (
-          <button
-            className="nodrag grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
-            disabled={running}
-            onClick={() => run(id)}
-            title="Exécuter jusqu'à ce nœud"
-          >
-            <Play size={12} fill="currentColor" />
-          </button>
-        )}
+        {runnable &&
+          (running ? (
+            <button
+              className="nodrag grid h-6 w-6 place-items-center rounded-md text-red-300 hover:bg-red-500/10"
+              onClick={() => stop([id])}
+              title="Arrêter ce nœud (annule sa requête fal)"
+            >
+              <Square size={11} fill="currentColor" />
+            </button>
+          ) : (
+            <button
+              className="nodrag grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-panel-2 hover:text-fg"
+              onClick={() => run(id)}
+              title="Exécuter jusqu'à ce nœud"
+            >
+              <Play size={12} fill="currentColor" />
+            </button>
+          ))}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 px-3.5 pb-3.5">{children}</div>
       {data.error && <div className="mx-3.5 mb-3 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">{data.error}</div>}
@@ -682,11 +729,11 @@ export function ModelNode(props: NodeProps<FlowNode>) {
   const [negative, setNegative] = useParam(id, data, "negative");
   const isLlm = model?.category === "llm";
   const isVideo = model?.category === "video";
+  const isAudio = model?.category === "audio";
   const patchNode = useFlow((s) => s.patchNode);
   const running = useRunning(id);
   const [finalizing, setFinalizing] = useState(false);
   const pickHistory = useFlow((s) => s.pickHistory);
-  const run = useFlow((s) => s.run);
   const draftId = data.outputs.draftId;
 
   async function finalize() {
@@ -704,7 +751,7 @@ export function ModelNode(props: NodeProps<FlowNode>) {
   }
 
   return (
-    <NodeShell {...props} icon={isLlm ? Sparkles : isVideo ? Clapperboard : ImageIcon} title={model?.label ?? data.params.modelId}
+    <NodeShell {...props} icon={isLlm ? Sparkles : isVideo ? Clapperboard : isAudio ? AudioLines : ImageIcon} title={model?.label ?? data.params.modelId}
       subtitle={model?.provider}
       modelId={data.params.modelId}
       llmModel={data.params.model}>
@@ -717,9 +764,9 @@ export function ModelNode(props: NodeProps<FlowNode>) {
       ) : (
         <>
           <Media
-            value={isVideo ? data.outputs.video : data.outputs.image}
+            value={isVideo ? data.outputs.video : isAudio ? data.outputs.audio : data.outputs.image}
             running={data.status === "running" || finalizing}
-            empty={isVideo ? <Clapperboard size={20} /> : <ImageIcon size={20} />}
+            empty={isVideo ? <Clapperboard size={20} /> : isAudio ? <AudioLines size={20} /> : <ImageIcon size={20} />}
             name={model?.label}
             history={data.history}
             onPick={(i) => pickHistory(id, i)}
@@ -751,14 +798,7 @@ export function ModelNode(props: NodeProps<FlowNode>) {
         />
       )}
       <div className="flex justify-end">
-        <button
-          className="nodrag flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:border-accent disabled:opacity-40"
-          disabled={running}
-          onClick={() => run(id)}
-          title="Exécute ce modèle (les nœuds en amont déjà générés sont réutilisés)"
-        >
-          <ArrowRight size={13} /> Exécuter
-        </button>
+        <RunStop id={id} running={running} title="Exécute ce modèle (les nœuds en amont déjà générés sont réutilisés)" />
       </div>
     </NodeShell>
   );
@@ -973,6 +1013,267 @@ export function VideoDescriberNode(props: NodeProps<FlowNode>) {
         Analyse détaillée
       </label>
       <TextOut value={props.data.outputs.text} />
+    </NodeShell>
+  );
+}
+
+/** Mirrors `recast::Piece` in Rust. */
+interface Piece {
+  source: string;
+  video: string;
+  error: string;
+}
+
+/** A Recast node's segments, when its source had to be cut. */
+function parsePieces(value: string | undefined): Piece[] {
+  if (!value?.startsWith("[")) return [];
+  try {
+    const pieces = JSON.parse(value);
+    return Array.isArray(pieces) ? pieces : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Values produced by every node wired into `handle`, in edge order. */
+function useInputValues(id: string, handle: string) {
+  // Joined so the selector returns a string, which compares by value.
+  const joined = useFlowStore((s) =>
+    s.edges
+      .filter((e) => e.target === id && e.targetHandle === handle)
+      .map((e) => (s.nodeLookup.get(e.source)?.data as FlowNode["data"] | undefined)?.outputs[e.sourceHandle ?? ""])
+      .filter(Boolean)
+      .join("\n"),
+  );
+  return joined ? joined.split("\n") : [];
+}
+
+/** Longest segment, in seconds; read by `recast::max_piece`. Shorter keeps the
+ *  character closer to the photo, since each segment starts again from it. */
+const RECAST_SEGMENTS: [string, string][] = [
+  ["auto", "Les plus longs possible"],
+  ["10", "10 s, plus fidèle"],
+  ["6", "6 s, le plus fidèle"],
+];
+
+export function RecastNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const patchNode = useFlow((s) => s.patchNode);
+  const setParam = useFlow((s) => s.setParam);
+  const pickHistory = useFlow((s) => s.pickHistory);
+  const run = useFlow((s) => s.run);
+  const running = useRunning(id);
+  const modes = useModels((s) => s.recastModes);
+  const mode = modes.find((m) => m.id === data.params.mode) ?? modes[0];
+  const model = findModel(data.params.modelId);
+  const choice = mode?.models.find((c) => c.id === data.params.modelId);
+  const source = useInputValue(id, "video");
+  const characters = useInputValues(id, "characters");
+  const [prompt, setPrompt] = useParam(id, data, "prompt");
+  const promptWired = useConnected(id, "prompt");
+  const pieces = parsePieces(data.outputs.pieces);
+  const [redoing, setRedoing] = useState<number | "join" | null>(null);
+  const ready = pieces.filter((p) => p.video).length;
+
+  // Another mode or model: its own defaults, and fal settings (`x:`) of the old endpoint dropped.
+  function choose(modeId: string, modelId?: string) {
+    // The new mode's instructions replace the old one's, but not the user's own.
+    const current = data.params.prompt ?? "";
+    const prompt = !current.trim() || current === recastPrompt(data.params.mode) ? recastPrompt(modeId) : current;
+    const kept = { prompt, segment: data.params.segment ?? "10" };
+    patchNode(id, { params: { ...recastParams(modeId, modelId), ...kept }, status: "idle", error: undefined });
+  }
+
+  /** Re-renders one segment only, or with "join" just joins them; Rust reads
+   *  `redo`, keeps the other segments and joins them once all are ready. */
+  async function redo(index: number | "join") {
+    setRedoing(index);
+    setParam(id, "redo", String(index));
+    try {
+      await run(id);
+    } finally {
+      setParam(id, "redo", "");
+      setRedoing(null);
+    }
+  }
+
+  const history = data.history ?? [];
+  const version = data.outputs.video ? history.lastIndexOf(data.outputs.video) : -1;
+  const iconButton = "nodrag grid h-6 w-6 place-items-center rounded-md hover:bg-panel-2 hover:text-fg disabled:opacity-30";
+
+  // Segments, small: to check and redo before joining. The finished video is
+  // shown by the Preview node only, so this node stays free for new settings.
+  const piecesView = pieces.length > 0 && (
+    <div className="flex flex-col gap-1.5">
+      <div className="grid grid-cols-3 gap-1.5">
+        {pieces.map((p, i) => (
+          <div key={i} className="flex flex-col gap-0.5">
+            <div className="checker relative grid aspect-[9/16] place-items-center overflow-hidden rounded-lg border border-line">
+              {p.video ? (
+                <video src={mediaSrc(p.video)} className="nodrag h-full w-full object-cover" controls muted loop playsInline />
+              ) : p.error ? (
+                <span className="px-1 text-center text-[10px] leading-tight text-red-300" title={p.error}>
+                  {/flagged by a content checker/i.test(p.error) ? "Refusé par le filtre de contenu du modèle" : p.error}
+                </span>
+              ) : running ? (
+                <Loader2 size={14} className="animate-spin text-muted" />
+              ) : (
+                <span className="text-[9px] text-muted">Arrêté</span>
+              )}
+              {redoing === i && <div className="absolute inset-0 animate-pulse bg-accent/10" />}
+            </div>
+            <div className="flex items-center text-[10px] text-muted">
+              <span className="mr-auto">Seg. {i + 1}</span>
+              {p.video && <DownloadButton path={p.video} name={`recast-segment-${i + 1}`} className={iconButton} />}
+              <button className={iconButton} disabled={running} onClick={() => redo(i)} title="Refaire ce segment seulement">
+                <RotateCcw size={12} />
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 text-[10px] text-muted">
+        <span className="mr-auto">
+          {ready < pieces.length
+            ? `${ready}/${pieces.length} segments prêts${running ? "" : " : refaites ceux en erreur pour assembler"}`
+            : data.outputs.video
+              ? "Assemblés : vidéo complète dans Preview"
+              : running
+                ? "Assemblage…"
+                : `${pieces.length} segments prêts`}
+        </span>
+        {ready === pieces.length && !data.outputs.video && !running && (
+          <button className="nodrag rounded-lg bg-fg px-2.5 py-1.5 text-[11px] font-medium text-bg" onClick={() => redo("join")} title="Réunit les segments dans l'ordre, dans le nœud Preview">
+            Assembler
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <NodeShell {...props} icon={Drama} title="Recast" subtitle={model?.label} modelId={data.params.modelId} cardWidth={340} fitHeight>
+      <div className="relative grid grid-cols-2 gap-1.5">
+        <div className="checker grid aspect-[4/5] place-items-center overflow-hidden rounded-xl border border-line">
+          {source ? (
+            <video src={mediaSrc(source)} className="nodrag h-full w-full object-cover" muted loop playsInline autoPlay />
+          ) : (
+            <span className="px-2 text-center text-[11px] text-muted">Reliez une vidéo source</span>
+          )}
+        </div>
+        <div className="checker grid aspect-[4/5] place-items-center overflow-hidden rounded-xl border border-line">
+          {characters.length ? (
+            <div className={`grid h-full w-full gap-0.5 ${characters.length > 1 ? "grid-cols-2" : ""}`}>
+              {characters.map((c, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img key={i} src={mediaSrc(c)} alt="" className="h-full w-full object-cover" draggable={false} />
+              ))}
+            </div>
+          ) : (
+            <span className="px-2 text-center text-[11px] text-muted">Reliez l&apos;image de votre personnage</span>
+          )}
+        </div>
+        {data.status === "running" && pieces.length === 0 && <div className="absolute inset-0 animate-pulse rounded-xl bg-accent/10" />}
+      </div>
+
+      {piecesView}
+
+      {data.outputs.video && (pieces.length === 0 || history.length > 1) && (
+        <div className="flex items-center gap-1 text-[10px] text-muted">
+          <span className="mr-auto">{pieces.length ? "Versions" : "Résultat affiché dans Preview"}</span>
+          {history.length > 1 && (
+            <>
+              <button className={iconButton} disabled={version <= 0} onClick={() => pickHistory(id, version - 1)} title="Version précédente">
+                ‹
+              </button>
+              <span>
+                {version + 1}/{history.length}
+              </span>
+              <button className={iconButton} disabled={version >= history.length - 1} onClick={() => pickHistory(id, version + 1)} title="Version suivante">
+                ›
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      <div className="nodrag grid grid-cols-2 gap-1 rounded-lg bg-panel-2 p-0.5">
+        {modes.map((m) => (
+          <button
+            key={m.id}
+            className={`rounded-md py-1.5 text-[12px] ${m.id === mode?.id ? "bg-panel text-fg shadow" : "text-muted hover:text-fg"}`}
+            onClick={() => m.id !== mode?.id && choose(m.id)}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
+      {mode && <div className="text-[10px] leading-snug text-muted">{mode.hint}</div>}
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="col-span-2">
+          <Select
+            label="Modèle"
+            value={data.params.modelId}
+            options={(mode?.models ?? []).map((c): [string, string] => [c.id, findModel(c.id)?.label ?? c.id])}
+            onChange={(v) => choose(mode!.id, v)}
+          />
+        </div>
+        <Select
+          label="Segments"
+          value={data.params.segment || "auto"}
+          options={RECAST_SEGMENTS}
+          onChange={(v) => setParam(id, "segment", v)}
+        />
+        {model?.params
+          .filter((p) => p.kind !== "bool" && p.options.length > 1)
+          .map((p) => (
+            <Select
+              key={p.key}
+              label={p.label}
+              value={p.options.includes(data.params[p.key]) ? data.params[p.key] : p.default}
+              options={p.options.map((o): [string, string] => [o, optionLabel(p.key, o)])}
+              onChange={(v) => setParam(id, p.key, v)}
+            />
+          ))}
+        {model?.params
+          .filter((p) => p.kind === "bool")
+          .map((p) => (
+            <label key={p.key} className="nodrag flex items-center gap-2 self-end pb-2 text-[11px] text-muted">
+              <input
+                type="checkbox"
+                className="accent-accent"
+                checked={(data.params[p.key] ?? p.default) === "true"}
+                onChange={(e) => setParam(id, p.key, String(e.target.checked))}
+              />
+              {p.label}
+            </label>
+          ))}
+      </div>
+      {choice && <div className="text-[10px] leading-snug text-muted">{choice.note}</div>}
+
+      {!promptWired && (
+        <textarea
+          className={`${GROW} ${field} nowheel h-14 resize-none`}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Consignes (optionnel) : qui devient qui, ce qu'il faut garder ou changer"
+        />
+      )}
+      <div className="flex items-center justify-between gap-2">
+        {!promptWired && mode?.prompt && prompt !== mode.prompt ? (
+          <button
+            className="nodrag text-left text-[10px] text-muted underline hover:text-fg"
+            onClick={() => setPrompt(mode.prompt)}
+            title={mode.prompt}
+          >
+            Consigne générique
+          </button>
+        ) : (
+          <span />
+        )}
+        <RunStop id={id} running={running} title="Le prix par exécution est affiché dans le panneau de droite" />
+      </div>
     </NodeShell>
   );
 }
@@ -1329,7 +1630,106 @@ export function AngleExportNode(props: NodeProps<FlowNode>) {
   );
 }
 
+/** Puts a sound on a video (fal's ffmpeg merge), from an offset in seconds. */
+export function AddAudioNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const [offset, setOffset] = useParam(id, data, "offset");
+  const pickHistory = useFlow((s) => s.pickHistory);
+  const running = useRunning(id);
+  return (
+    <NodeShell {...props} icon={AudioLines} title="Ajouter le son">
+      <Media
+        value={data.outputs.video}
+        running={data.status === "running"}
+        empty={<span>Reliez une vidéo et un son</span>}
+        name="video-son"
+        history={data.history}
+        onPick={(i) => pickHistory(id, i)}
+      />
+      <label className="nodrag flex items-center justify-between gap-2 text-[11px] text-muted">
+        Début du son (s)
+        <input
+          type="number"
+          min={0}
+          step={0.5}
+          className={`${field} w-20 text-right`}
+          value={offset}
+          onChange={(e) => setOffset(e.target.value)}
+        />
+      </label>
+      <div className="text-[10px] leading-snug text-muted">Remplace la piste son de la vidéo.</div>
+      <div className="flex justify-end">
+        <RunStop id={id} running={running} title="Pose le son sur la vidéo" />
+      </div>
+    </NodeShell>
+  );
+}
+
+/** Images, videos and sounds as layers, placed in a full-screen editor and rendered with ffmpeg. */
+export function CompositorNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const setParam = useFlow((s) => s.setParam);
+  const running = useRunning(id);
+  const [editing, setEditing] = useState(false);
+  const numbers = compositorLayers(data.params);
+  const ports = [{ port: "bg", label: "Arrière-plan" }, ...numbers.map((i) => ({ port: `layer${i}`, label: `Calque ${i}` }))];
+  // One string, so the selector's result compares equal between renders.
+  const joined = useFlowStore((s) =>
+    ports
+      .map(({ port }) => {
+        const edge = s.edges.find((e) => e.target === id && e.targetHandle === port);
+        const src = edge && (s.nodeLookup.get(edge.source)?.data as FlowNode["data"] | undefined);
+        return (src && src.outputs[edge.sourceHandle ?? ""]) ?? "";
+      })
+      .join("\u0000"),
+  );
+  const values = joined.split("\u0000");
+  const layers: LayerInput[] = ports.map((p, i) => ({ ...p, value: values[i] || undefined }));
+  const last = numbers.length;
+  const lastWired = useConnected(id, `layer${last}`);
+
+  return (
+    <NodeShell {...props} icon={Layers} title="Compositeur" handleStep={26}>
+      <Media
+        value={data.outputs.media}
+        running={data.status === "running"}
+        empty={<span>Reliez des images, vidéos ou sons, puis éditez</span>}
+        name="composition"
+      />
+      <div className="flex items-center gap-1">
+        <button
+          className="nodrag flex items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
+          disabled={last >= MAX_LAYERS}
+          onClick={() => setParam(id, "layers", String(last + 1))}
+          title="Ajoute une entrée de calque"
+        >
+          <Plus size={13} /> Calque
+        </button>
+        <button
+          className="nodrag grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
+          disabled={last === 0 || lastWired}
+          onClick={() => setParam(id, "layers", String(last - 1))}
+          title={lastWired ? "Débranchez d'abord le dernier calque" : "Retire le dernier calque"}
+        >
+          <Minus size={13} />
+        </button>
+        <div className="ml-auto flex gap-1.5">
+          <button
+            className="nodrag flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:border-accent"
+            onClick={() => setEditing(true)}
+          >
+            <Pencil size={12} /> Éditer
+          </button>
+          <RunStop id={id} running={running} title="Exporte la composition en vidéo ou en image, sur cet ordinateur (gratuit)" />
+        </div>
+      </div>
+      {editing && <CompositorEditor id={id} params={data.params} layers={layers} onClose={() => setEditing(false)} />}
+    </NodeShell>
+  );
+}
+
 export const nodeTypes = {
+  compositor: CompositorNode,
   prompt: PromptNode,
   list: ListNode,
   gridCrop: GridCropNode,
@@ -1345,4 +1745,6 @@ export const nodeTypes = {
   enhancer: EnhancerNode,
   describer: DescriberNode,
   videoDescriber: VideoDescriberNode,
+  recast: RecastNode,
+  addAudio: AddAudioNode,
 };

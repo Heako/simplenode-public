@@ -2,12 +2,13 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { useStore as useFlowStore } from "@xyflow/react";
-import { ArrowRight, ChevronRight, Info, Loader2, Minus, Plus, RotateCcw, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, ChevronRight, Info, Loader2, Minus, Plus, RotateCcw, SlidersHorizontal, Square } from "lucide-react";
 import { useEffect, useState } from "react";
 import { create } from "zustand";
-import { useFlow, useRunning, type FlowNode } from "@/lib/store";
+import { hasHistory, useFlow, useRunning, type FlowNode } from "@/lib/store";
 import { findModel, useModels } from "@/lib/spec";
 import { isAdvanced, optionLabel, settingLabel } from "@/lib/settingLabels";
+import { perSecond, useVideoDuration } from "@/lib/cost";
 import ProviderIcon from "./ProviderIcon";
 
 /** Mirrors `schema::Setting` in src-tauri. */
@@ -195,7 +196,7 @@ function money(value: number, currency: string) {
 export default function Inspector() {
   const node = useFlow((s) => {
     const selected = s.nodes.filter((n) => n.selected);
-    return selected.length === 1 && selected[0].data.kind === "model" ? selected[0] : null;
+    return selected.length === 1 && hasHistory(selected[0]) ? selected[0] : null;
   });
   if (!node) return null;
   return <ModelInspector key={node.id} node={node} />;
@@ -208,6 +209,7 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const setParam = useFlow((s) => s.setParam);
   const patchNode = useFlow((s) => s.patchNode);
   const run = useFlow((s) => s.run);
+  const stop = useFlow((s) => s.stop);
   const running = useRunning(id);
   const refsWired = useFlowStore((s) => s.edges.some((e) => e.target === id && e.targetHandle === "refs"));
   const endpoint = (refsWired ? model?.editEndpoint : model?.textEndpoint) ?? model?.textEndpoint ?? model?.editEndpoint ?? null;
@@ -216,6 +218,14 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const { settings, prices, loadSettings, loadPrices } = useRemote();
   const [runs, setRuns] = useState(1);
   const [progress, setProgress] = useState<number | null>(null);
+  // Recast is billed per second of video: the estimate needs the source's length.
+  const source = useFlowStore((s) => {
+    if (data.kind !== "recast") return undefined;
+    const edge = s.edges.find((e) => e.target === id && e.targetHandle === "video");
+    const from = edge && (s.nodeLookup.get(edge.source)?.data as FlowNode["data"] | undefined);
+    return from ? from.outputs[edge.sourceHandle ?? ""] : undefined;
+  });
+  const duration = useVideoDuration(source);
 
   useEffect(() => {
     if (endpoint) loadSettings(endpoint);
@@ -240,7 +250,8 @@ function ModelInspector({ node }: { node: FlowNode }) {
       default: p.default,
       description: null,
     }));
-  const own = new Set([...model.params.map((p) => p.key), "prompt", "negative_prompt"]);
+  // ElevenLabs sound effects name their prompt `text`: it comes from the node, not here.
+  const own = new Set([...model.params.map((p) => p.key), "prompt", "negative_prompt", ...(model.category === "audio" ? ["text"] : [])]);
   const otherList = other ? settings[other] : undefined;
   const otherOnly: Shown[] = Array.isArray(otherList) && Array.isArray(list)
     ? otherList
@@ -255,6 +266,8 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const touched = Object.keys(data.params).some((k) => k.startsWith("x:") && data.params[k] !== "");
   const price = prices?.find((p) => p.endpoint === endpoint);
   const perRun = price?.unitPrice != null && price.unit && PER_RUN_UNITS.has(price.unit);
+  const rate = data.kind === "recast" ? perSecond(price, data.params.resolution) : null;
+  const currency = price?.currency ?? "USD";
   const control = (s: Shown, key: string) => (
     <div key={s.key} className={s.onlyIn ? "opacity-60" : undefined} title={s.onlyIn ? "Appliqué seulement dans ce mode" : undefined}>
       <SettingControl setting={s} value={data.params[key]} onChange={(v) => setParam(id, key, v)} />
@@ -265,8 +278,8 @@ function ModelInspector({ node }: { node: FlowNode }) {
     for (let i = 0; i < runs; i++) {
       setProgress(i + 1);
       await run(id);
-      // Stop the series when a run fails.
-      if (useFlow.getState().nodes.find((n) => n.id === id)?.data.status === "error") break;
+      // Stop the series when a run fails or is stopped.
+      if (useFlow.getState().nodes.find((n) => n.id === id)?.data.status !== "done") break;
     }
     setProgress(null);
   }
@@ -283,10 +296,18 @@ function ModelInspector({ node }: { node: FlowNode }) {
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium">{data.title || model.label}</div>
           <div className="truncate text-[10px] text-muted">
-            {model.provider} · {refsWired ? (model.category === "video" ? "image → vidéo" : "édition") : "texte →"}
+            {model.provider} ·{" "}
+            {data.kind === "recast" ? "vidéo → vidéo" : refsWired ? (model.category === "video" ? "image → vidéo" : "édition") : "texte →"}
           </div>
         </div>
-        {price?.unitPrice != null && (
+        {rate != null ? (
+          <span
+            className="shrink-0 rounded-md bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted tabular-nums"
+            title={`Tarif fal : ${money(rate, currency)} par seconde de vidéo, à cette résolution`}
+          >
+            {money(rate, currency)} / s
+          </span>
+        ) : price?.unitPrice != null && (
           <span
             className="shrink-0 rounded-md bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted tabular-nums"
             title={`Tarif fal : ${money(price.unitPrice, price.currency ?? "USD")} par ${price.unit}`}
@@ -339,29 +360,31 @@ function ModelInspector({ node }: { node: FlowNode }) {
         </div>
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted">Coût estimé</span>
-          <span className="tabular-nums">
-            {price?.unitPrice == null
+          <span className="tabular-nums" title={rate != null ? "Prix par seconde × durée de la vidéo source. Refaire un segment coûte sa durée." : undefined}>
+            {rate != null
+              ? duration != null
+                ? `${money(rate * duration * runs, currency)} (${Math.round(duration)} s)`
+                : `${money(rate, currency)} / s de vidéo`
+              : price?.unitPrice == null
               ? "—"
               : perRun
                 ? money(price.unitPrice * runs, price.currency ?? "USD")
                 : `${money(price.unitPrice, price.currency ?? "USD")} / ${price.unit}`}
           </span>
         </div>
-        <button
-          className="flex w-full items-center justify-center gap-2 rounded-lg bg-fg py-2 text-[13px] font-medium text-bg disabled:opacity-50"
-          disabled={running || progress !== null}
-          onClick={runRepeated}
-        >
-          {progress !== null ? (
-            <>
-              <Loader2 size={14} className="animate-spin" /> Run {progress}/{runs}
-            </>
-          ) : (
-            <>
-              <ArrowRight size={14} /> Exécuter{runs > 1 ? ` ×${runs}` : ""}
-            </>
-          )}
-        </button>
+        {running || progress !== null ? (
+          <button
+            className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-500/50 py-2 text-[13px] font-medium text-red-300 hover:bg-red-500/10"
+            onClick={() => stop([id])}
+            title="Arrête ce nœud et annule sa requête fal"
+          >
+            <Square size={12} fill="currentColor" /> Arrêter{progress !== null && runs > 1 ? ` (run ${progress}/${runs})` : ""}
+          </button>
+        ) : (
+          <button className="flex w-full items-center justify-center gap-2 rounded-lg bg-fg py-2 text-[13px] font-medium text-bg" onClick={runRepeated}>
+            <ArrowRight size={14} /> Exécuter{runs > 1 ? ` ×${runs}` : ""}
+          </button>
+        )}
         {runs > 1 && <p className="text-[10px] leading-snug text-muted">Chaque run s&apos;ajoute à l&apos;historique du nœud (‹ › sur l&apos;image).</p>}
       </footer>
     </aside>

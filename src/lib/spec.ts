@@ -19,7 +19,10 @@ export type NodeKind =
   | "gridCrop"
   | "angles"
   | "anglePick"
-  | "angleExport";
+  | "angleExport"
+  | "recast"
+  | "addAudio"
+  | "compositor";
 
 export type NodeStatus = "idle" | "running" | "done" | "error";
 
@@ -46,10 +49,10 @@ export interface ModelDef {
   id: string;
   label: string;
   provider: string;
-  category: "image" | "video" | "llm";
+  category: "image" | "video" | "llm" | "audio";
   textEndpoint: string | null;
   editEndpoint: string | null;
-  refField: "urls" | "url";
+  refField: "urls" | "url" | "startImage" | "referenceUrls";
   maxRefs: number;
   endField: string | null;
   /** Renders a 480p preview that can be finalized in 1080p. */
@@ -90,15 +93,50 @@ export interface Shot {
   label: string;
 }
 
-/** Registries served by Rust: models and camera shots. */
-export const useModels = create<{ models: ModelDef[]; shots: Shot[]; load: () => Promise<void> }>((set) => ({
+/** Mirrors `recast::Mode` in src-tauri. */
+export interface RecastMode {
+  id: string;
+  label: string;
+  hint: string;
+  /** Instructions a new node starts with. */
+  prompt: string;
+  /** Best first; `note` gives the endpoint's limits. */
+  models: { id: string; note: string }[];
+}
+
+/** Registries served by Rust: models, camera shots and recast modes. */
+export const useModels = create<{ models: ModelDef[]; shots: Shot[]; recastModes: RecastMode[]; load: () => Promise<void> }>((set) => ({
   models: [],
   shots: [],
+  recastModes: [],
   load: async () => {
-    const [models, shots] = await Promise.all([invoke<ModelDef[]>("list_models"), invoke<Shot[]>("camera_shots")]);
-    set({ models, shots });
+    const [models, shots, recastModes] = await Promise.all([
+      invoke<ModelDef[]>("list_models"),
+      invoke<Shot[]>("camera_shots"),
+      invoke<RecastMode[]>("recast_modes"),
+    ]);
+    set({ models, shots, recastModes });
   },
 }));
+
+/** Recast models only run inside a Recast node, never as a plain model node. */
+export function isRecastModel(id: string) {
+  return useModels.getState().recastModes.some((m) => m.models.some((c) => c.id === id));
+}
+
+/** A Recast node's params for `mode` and one of its models (the mode's best by default). */
+export function recastParams(mode: string, modelId?: string): Record<string, string> {
+  const choices = useModels.getState().recastModes.find((m) => m.id === mode)?.models ?? [];
+  const id = choices.some((c) => c.id === modelId) ? modelId! : (choices[0]?.id ?? "");
+  const params: Record<string, string> = { mode, modelId: id };
+  findModel(id)?.params.forEach((p) => (params[p.key] = p.default));
+  return params;
+}
+
+/** The instructions a recast node of this mode starts with. */
+export function recastPrompt(mode: string): string {
+  return useModels.getState().recastModes.find((m) => m.id === mode)?.prompt ?? "";
+}
 
 /** Grid layouts of the camera angles node as [columns, rows]; same as `angles::LAYOUTS`. */
 export const ANGLE_LAYOUTS: [number, number][] = [
@@ -141,6 +179,24 @@ export function findModel(id: string | undefined) {
   return useModels.getState().models.find((m) => m.id === id);
 }
 
+/** Must match `compose::MAX_LAYERS` in src-tauri. */
+export const MAX_LAYERS = 12;
+
+/** Numbers of a compositor's layer inputs, 1 to n, above its background. */
+export function compositorLayers(params: Record<string, string>): number[] {
+  const n = Math.min(Math.max(Number(params.layers) || 0, 0), MAX_LAYERS);
+  return Array.from({ length: n }, (_, i) => i + 1);
+}
+
+/** The name the user gave a compositor layer, if any. */
+function layerName(params: Record<string, string>, port: string): string | undefined {
+  try {
+    return JSON.parse(params.comp || "{}")[port]?.name || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Port[]; outputs: Port[] } {
   switch (data.kind) {
     case "prompt":
@@ -156,7 +212,8 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       return { inputs: [], outputs: [{ id: media, label, type: media }] };
     }
     case "preview":
-      return { inputs: [{ id: "value", label: "Entrée", type: "any" }], outputs: [] };
+      // Passes its value on, so a result checked here can feed the next step.
+      return { inputs: [{ id: "value", label: "Entrée", type: "any" }], outputs: [{ id: "value", label: "Sortie", type: "any" }] };
     case "router":
       return { inputs: [{ id: "value", label: "Entrée", type: "any" }], outputs: [{ id: "value", label: "Sortie", type: "any" }] };
     case "concat":
@@ -166,6 +223,22 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       };
     case "crop":
       return { inputs: [{ id: "image", label: "Image", type: "image" }], outputs: [{ id: "image", label: "Image", type: "image" }] };
+    case "compositor":
+      return {
+        inputs: [
+          { id: "bg", label: layerName(data.params, "bg") ?? "Arrière-plan", type: "any" },
+          ...compositorLayers(data.params).map((i): Port => ({ id: `layer${i}`, label: layerName(data.params, `layer${i}`) ?? `Calque ${i}`, type: "any" })),
+        ],
+        outputs: [{ id: "media", label: "Sortie", type: "any" }],
+      };
+    case "addAudio":
+      return {
+        inputs: [
+          { id: "video", label: "Vidéo", type: "video" },
+          { id: "audio", label: "Son", type: "audio" },
+        ],
+        outputs: [{ id: "video", label: "Vidéo", type: "video" }],
+      };
     case "angles": {
       return {
         inputs: [
@@ -187,6 +260,17 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       return { inputs: [{ id: "image", label: "Image", type: "image" }], outputs: [{ id: "text", label: "Texte", type: "text" }] };
     case "videoDescriber":
       return { inputs: [{ id: "video", label: "Vidéo", type: "video" }], outputs: [{ id: "text", label: "Texte", type: "text" }] };
+    case "recast": {
+      const most = findModel(data.params.modelId)?.maxRefs ?? 1;
+      return {
+        inputs: [
+          { id: "video", label: "Vidéo source", type: "video" },
+          { id: "characters", label: most > 1 ? `Personnages (≤${most})` : "Personnage", type: "image", multiple: most > 1 },
+          { id: "prompt", label: "Consignes (optionnel)", type: "text", multiple: true },
+        ],
+        outputs: [{ id: "video", label: "Vidéo", type: "video" }],
+      };
+    }
     case "model": {
       const model = findModel(data.params.modelId);
       const inputs: Port[] = [{ id: "prompt", label: "Prompt", type: "text", multiple: true }];
@@ -213,7 +297,9 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       const out: Port =
         model?.category === "llm"
           ? { id: "text", label: "Texte", type: "text" }
-          : isVideo
+          : model?.category === "audio"
+            ? { id: "audio", label: "Son", type: "audio" }
+            : isVideo
             ? { id: "video", label: "Vidéo", type: "video" }
             : { id: "image", label: "Image", type: "image" };
       return { inputs, outputs: [out] };
@@ -286,6 +372,10 @@ export function defaultParams(kind: NodeKind, modelId?: string): Record<string, 
       return { separator: "newline" };
     case "crop":
       return { aspect: "free", x: "0", y: "0", w: "100", h: "100" };
+    case "addAudio":
+      return { offset: "0" };
+    case "compositor":
+      return { layers: "1", comp: "{}", width: "", height: "", timeline: "false" };
     case "gridCrop":
       return { rows: "2", cols: "2", inset: "0" };
     case "anglePick":
@@ -309,6 +399,8 @@ export function defaultParams(kind: NodeKind, modelId?: string): Record<string, 
       return { model: DEFAULT_LLM, detail: "long" };
     case "videoDescriber":
       return { question: "", detailed: "false" };
+    case "recast":
+      return { ...recastParams("replace"), prompt: recastPrompt("replace"), segment: "10" };
     case "model": {
       const model = findModel(modelId);
       const params: Record<string, string> = { modelId: modelId ?? "", prompt: "" };
@@ -338,8 +430,11 @@ export interface LibraryItem {
   modelId?: string;
   label: string;
   hint: string;
-  group: "inputs" | "tools" | "image" | "video" | "text" | "outputs";
+  group: "inputs" | "tools" | "image" | "video" | "audio" | "text" | "outputs";
 }
+
+/** Models listed with audio though they return a video: they give it sound. */
+const AUDIO_TOOLS = new Set(["mmaudio-v2-video"]);
 
 export function libraryItems(models: ModelDef[]): LibraryItem[] {
   return [
@@ -355,13 +450,16 @@ export function libraryItems(models: ModelDef[]): LibraryItem[] {
     { key: "enhancer", kind: "enhancer", label: "Prompt Enhancer", hint: "Enrichir un prompt (LLM)", group: "text" },
     { key: "describer", kind: "describer", label: "Image Describer", hint: "Image → texte (LLM)", group: "text" },
     { key: "videoDescriber", kind: "videoDescriber", label: "Video Describer", hint: "Vidéo → texte", group: "text" },
-    ...models.map<LibraryItem>((m) => ({
+    { key: "compositor", kind: "compositor", label: "Compositeur", hint: "Calques d'images, de vidéos et de sons", group: "video" },
+    { key: "recast", kind: "recast", label: "Recast", hint: "Vidéo source + personnage → nouvelle vidéo", group: "video" },
+    { key: "addAudio", kind: "addAudio", label: "Ajouter le son", hint: "Pose une piste son sur une vidéo", group: "audio" },
+    ...models.filter((m) => !isRecastModel(m.id)).map<LibraryItem>((m) => ({
       key: m.id,
       kind: "model",
       modelId: m.id,
       label: m.label,
       hint: m.provider,
-      group: m.category === "llm" ? "text" : m.category,
+      group: m.category === "llm" ? "text" : AUDIO_TOOLS.has(m.id) ? "audio" : m.category,
     })),
     { key: "angleExport", kind: "angleExport", label: "Export des angles", hint: "Enregistrer tous les plans dans un dossier", group: "outputs" },
     { key: "preview", kind: "preview", label: "Preview", hint: "Afficher un résultat", group: "outputs" },

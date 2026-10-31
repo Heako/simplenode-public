@@ -30,6 +30,10 @@ const MODEL_LOGOS: Record<string, { file: string; mono?: boolean }> = {
   "veo-3.1-fast": { file: "google-color" },
   "wan-2.5": { file: "alibaba-color" },
   "ltx-2": { file: "lightricks", mono: true },
+  "h3-max-recast": { file: "minimax-color" },
+  "wan-2.2-animate-replace": { file: "alibaba-color" },
+  "kling-3-pro-motion": { file: "kling-color" },
+  "kling-3-standard-motion": { file: "kling-color" },
 };
 
 /** LLM nodes show the logo of the model currently selected. */

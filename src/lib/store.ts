@@ -33,6 +33,11 @@ import {
 
 export type FlowNode = Node<NodeData>;
 
+/** Nodes that generate media with a model and keep every result in `history`. */
+export function hasHistory(node: FlowNode) {
+  return node.data.kind === "model" || node.data.kind === "recast" || node.data.kind === "addAudio";
+}
+
 /** A connection dragged from a port and dropped somewhere other than a port. */
 export interface PendingLink {
   nodeId: string;
@@ -125,6 +130,8 @@ interface FlowState {
   undo: () => void;
   redo: () => void;
   run: (targetId?: string) => Promise<void>;
+  /** Stops these nodes, or every running one; Rust cancels their fal requests. */
+  stop: (ids?: string[]) => void;
   applyStatus: (event: NodeStatusEvent) => void;
   clear: () => void;
   /**
@@ -475,10 +482,14 @@ export const useFlow = create<FlowState>()((set, get) => ({
     }
   },
 
+  stop: (ids) => {
+    invoke("stop_nodes", { ids: ids ?? null }).catch((err) => set({ notice: String(err) }));
+  },
+
   applyStatus: ({ id, status, outputs, error }) => {
     const node = get().nodes.find((n) => n.id === id);
     // Model results join the node's history, so earlier ones stay reachable.
-    const media = outputs && node?.data.kind === "model" ? (outputs.image ?? outputs.video) : undefined;
+    const media = outputs && node && hasHistory(node) ? (outputs.image ?? outputs.video ?? outputs.audio) : undefined;
     const history = media ? [...(node!.data.history ?? []).filter((h) => h !== media), media] : undefined;
     get().patchNode(id, { status, error, ...(outputs ? { outputs } : {}), ...(history ? { history } : {}) });
   },
@@ -497,9 +508,16 @@ export const useFlow = create<FlowState>()((set, get) => ({
     const node = get().nodes.find((n) => n.id === nodeId);
     const value = node?.data.history?.[index];
     if (!node || !value) return;
-    const key = node.data.outputs.video !== undefined || /\.(mp4|mov|webm)$/i.test(value) ? "video" : "image";
+    const key =
+      node.data.outputs.video !== undefined || /\.(mp4|mov|webm)$/i.test(value)
+        ? "video"
+        : node.data.outputs.audio !== undefined || /\.(mp3|wav|m4a|aac|ogg)$/i.test(value)
+          ? "audio"
+          : "image";
     // Drafts can only be finalized from the result that produced them.
-    get().patchNode(nodeId, { outputs: { [key]: value }, status: "done", error: undefined });
+    // Recast keeps its segments, which are not part of the history.
+    const kept = node.data.kind === "recast" ? node.data.outputs : {};
+    get().patchNode(nodeId, { outputs: { ...kept, [key]: value }, status: "done", error: undefined });
   },
 
   clear: () => {
@@ -509,8 +527,8 @@ export const useFlow = create<FlowState>()((set, get) => ({
 
   purgeResults: (ids) => {
     const { nodes, edges } = get();
-    const hasResults = (n: FlowNode) => n.data.kind === "model" && (Object.keys(n.data.outputs).length > 0 || !!n.data.history?.length);
-    const selected = nodes.filter((n) => n.selected && n.data.kind === "model");
+    const hasResults = (n: FlowNode) => hasHistory(n) && (Object.keys(n.data.outputs).length > 0 || !!n.data.history?.length);
+    const selected = nodes.filter((n) => n.selected && hasHistory(n));
     const scope = ids ? new Set(ids) : selected.length ? new Set(selected.map((n) => n.id)) : null;
     const targets = nodes.filter((n) => hasResults(n) && n.data.status !== "running" && (!scope || scope.has(n.id)));
     if (!targets.length) return 0;

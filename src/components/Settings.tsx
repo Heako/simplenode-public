@@ -7,6 +7,7 @@ import { Check, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, Refres
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import ProviderIcon from "./ProviderIcon";
 import { useModels } from "@/lib/spec";
+import { perSecondRows } from "@/lib/cost";
 
 type KeyKind = "main" | "billing";
 
@@ -17,7 +18,7 @@ interface KeyStatus {
 
 interface PriceRow {
   label: string;
-  category: "image" | "video" | "llm" | "outil";
+  category: "image" | "video" | "llm" | "audio" | "outil";
   mode: string;
   endpoint: string;
   unitPrice: number | null;
@@ -204,6 +205,7 @@ const PERIODS: [number, string][] = [
 const CATEGORY_TITLES: Record<PriceRow["category"], string> = {
   image: "Modèles d'image",
   video: "Modèles vidéo",
+  audio: "Musique & son",
   llm: "Texte",
   outil: "Outils",
 };
@@ -224,7 +226,7 @@ function CostsSection() {
   const loadPrices = useCallback(() => {
     setPrices({ busy: true });
     invoke<PriceRow[]>("model_prices")
-      .then((data) => setPrices({ data }))
+      .then((data) => setPrices({ data: perSecondRows(data) }))
       .catch((e) => setPrices({ error: String(e) }));
   }, []);
 

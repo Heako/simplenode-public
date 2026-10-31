@@ -191,12 +191,16 @@ pub fn parse(doc: &Value) -> Vec<Setting> {
             numeric_options,
             min: bounds.and_then(|b| b["minimum"].as_f64()),
             max: bounds.and_then(|b| b["maximum"].as_f64()),
-            default: as_text(&prop["default"]),
+            default: if OFF_BY_DEFAULT.contains(&key.as_str()) { Some("false".into()) } else { as_text(&prop["default"]) },
             description: prop["description"].as_str().map(|d| d.trim().to_owned()),
         });
     }
     settings
 }
+
+/// Toggles the app turns off unless the user turns them on, against fal's
+/// default: the safety checker refuses ordinary photos and videos too often.
+const OFF_BY_DEFAULT: &[&str] = &["enable_safety_checker"];
 
 /// Node values for `x:<key>` params, typed for the endpoint. Keys the endpoint
 /// doesn't declare and empty values are left out.
@@ -204,6 +208,9 @@ pub fn extras(settings: &[Setting], params: &HashMap<String, String>) -> Map<Str
     let mut out = Map::new();
     for s in settings {
         let Some(raw) = params.get(&format!("x:{}", s.key)).map(|v| v.trim()).filter(|v| !v.is_empty()) else {
+            if OFF_BY_DEFAULT.contains(&s.key.as_str()) {
+                out.insert(s.key.clone(), json!(false));
+            }
             continue;
         };
         let value = match s.kind {

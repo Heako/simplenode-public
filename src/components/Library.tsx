@@ -13,6 +13,8 @@ import {
   ImageUp,
   Images,
   ListChecks,
+  AudioLines,
+  Layers,
   Grid3x3,
   Merge,
   Search,
@@ -29,13 +31,14 @@ import { useFlow } from "@/lib/store";
 import ProviderIcon from "./ProviderIcon";
 import { libraryItems, useModels, type LibraryItem } from "@/lib/spec";
 
-type Section = "search" | "tools" | "image" | "video" | "text";
+type Section = "search" | "tools" | "image" | "video" | "audio" | "text";
 
 const RAIL: { id: Section; label: string; icon: LucideIcon }[] = [
   { id: "search", label: "Tout", icon: Search },
   { id: "tools", label: "Outils", icon: Wrench },
   { id: "image", label: "Image", icon: ImageIcon },
   { id: "video", label: "Vidéo", icon: Clapperboard },
+  { id: "audio", label: "Audio", icon: AudioLines },
   { id: "text", label: "Texte", icon: Sparkles },
 ];
 
@@ -44,11 +47,12 @@ export const GROUP_TITLES: Record<LibraryItem["group"], string> = {
   tools: "Outils",
   image: "Modèles d'image",
   video: "Modèles vidéo",
+  audio: "Musique & son",
   text: "Texte & analyse",
   outputs: "Sorties",
 };
 
-const GROUP_ORDER: LibraryItem["group"][] = ["inputs", "tools", "image", "video", "text", "outputs"];
+const GROUP_ORDER: LibraryItem["group"][] = ["inputs", "tools", "image", "video", "audio", "text", "outputs"];
 
 /** Node width is 300px; this centers a new node on the drop point. */
 const NODE_HALF_WIDTH = 150;
@@ -68,10 +72,12 @@ const KIND_ICONS: Partial<Record<LibraryItem["kind"], LucideIcon>> = {
   enhancer: WandSparkles,
   describer: FileText,
   videoDescriber: Film,
+  addAudio: AudioLines,
+  compositor: Layers,
 };
 
 export function itemIcon(item: LibraryItem): LucideIcon {
-  return KIND_ICONS[item.kind] ?? (item.group === "text" ? Sparkles : item.group === "video" ? Clapperboard : ImageIcon);
+  return KIND_ICONS[item.kind] ?? (item.group === "text" ? Sparkles : item.group === "video" ? Clapperboard : item.group === "audio" ? AudioLines : ImageIcon);
 }
 
 export function filterItems(items: LibraryItem[], query: string) {
@@ -102,6 +108,8 @@ function sectionGroups(section: Section): LibraryItem["group"][] {
       return ["image"];
     case "video":
       return ["video"];
+    case "audio":
+      return ["audio"];
     case "text":
       return ["text"];
     default:

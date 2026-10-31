@@ -43,7 +43,7 @@ pub fn extension(path: &Path) -> String {
     path.extension().and_then(|e| e.to_str()).unwrap_or_default().to_ascii_lowercase()
 }
 
-fn new_path(app: &AppHandle, ext: &str) -> Result<PathBuf> {
+pub fn new_path(app: &AppHandle, ext: &str) -> Result<PathBuf> {
     Ok(images_dir(app)?.join(format!("{}.{ext}", uuid::Uuid::new_v4())))
 }
 
@@ -55,6 +55,64 @@ pub fn owned_path(app: &AppHandle, value: &str) -> Result<PathBuf> {
         return Err(AppError::Invalid("Chemin hors du stockage de l'app".into()));
     }
     Ok(path)
+}
+
+/// Length in seconds of an MP4 or MOV file, read from its `moov/mvhd` box
+/// without decoding anything. None for other formats or a malformed file.
+pub fn video_duration(path: &Path) -> Option<f64> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let len = file.metadata().ok()?.len();
+    let mut pos = 0;
+    // Top-level boxes: `moov` may come before or after the media data.
+    while pos + 8 <= len {
+        file.seek(SeekFrom::Start(pos)).ok()?;
+        let mut header = [0u8; 16];
+        file.read_exact(&mut header[..8]).ok()?;
+        let size32 = u32::from_be_bytes(header[..4].try_into().ok()?) as u64;
+        let (size, header_len) = match size32 {
+            0 => (len - pos, 8),
+            1 => {
+                file.read_exact(&mut header[8..]).ok()?;
+                (u64::from_be_bytes(header[8..].try_into().ok()?), 16)
+            }
+            n => (n, 8),
+        };
+        if size < header_len {
+            return None;
+        }
+        if &header[4..8] == b"moov" {
+            let mut moov = vec![0u8; (size - header_len) as usize];
+            file.read_exact(&mut moov).ok()?;
+            return mvhd_duration(&moov);
+        }
+        pos += size;
+    }
+    None
+}
+
+/// Duration from the `mvhd` child of a `moov` box's content.
+fn mvhd_duration(moov: &[u8]) -> Option<f64> {
+    let mut pos = 0;
+    while pos + 8 <= moov.len() {
+        let size = u32::from_be_bytes(moov[pos..pos + 4].try_into().ok()?) as usize;
+        if size < 8 || pos + size > moov.len() {
+            return None;
+        }
+        if &moov[pos + 4..pos + 8] == b"mvhd" {
+            let body = &moov[pos + 8..pos + size];
+            let be32 = |at: usize| body.get(at..at + 4).map(|b| u32::from_be_bytes(b.try_into().unwrap()) as u64);
+            // Version 1 has 64-bit creation, modification and duration fields.
+            let (timescale, duration) = if body.first()? == &1 {
+                (be32(20)?, u64::from_be_bytes(body.get(24..32)?.try_into().ok()?))
+            } else {
+                (be32(12)?, be32(16)?)
+            };
+            return (timescale > 0).then(|| duration as f64 / timescale as f64);
+        }
+        pos += size;
+    }
+    None
 }
 
 /// Copies a user-picked file into app storage so it survives the original moving.
@@ -84,8 +142,14 @@ pub async fn download(app: &AppHandle, http: &Client, url: &str) -> Result<PathB
         Some("video/mp4") => "mp4",
         Some("video/webm") => "webm",
         Some("video/quicktime") => "mov",
-        // Some CDNs serve videos as octet-stream; trust the URL then.
+        Some("audio/mpeg" | "audio/mp3") => "mp3",
+        Some("audio/wav" | "audio/x-wav" | "audio/wave") => "wav",
+        Some("audio/ogg" | "audio/opus") => "ogg",
+        Some("audio/mp4" | "audio/x-m4a") => "m4a",
+        // Some CDNs serve media as octet-stream; trust the URL then.
         _ if url.ends_with(".mp4") => "mp4",
+        _ if url.ends_with(".mp3") => "mp3",
+        _ if url.ends_with(".wav") => "wav",
         _ => "png",
     };
     let bytes = res.bytes().await?;
