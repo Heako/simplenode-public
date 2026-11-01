@@ -3,7 +3,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Check, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
+import { Check, Coffee, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import ProviderIcon from "./ProviderIcon";
 import { useModels } from "@/lib/spec";
@@ -427,11 +427,26 @@ function AboutSection() {
   );
 }
 
+function CoffeeSection() {
+  return (
+    <Section id="coffee" icon={Coffee} title="Buy me a coffee" description="SimpleNode est gratuit. Si l'app vous rend service, vous pouvez soutenir son développement.">
+      <button
+        onClick={() => openUrl("https://buymeacoffee.com/heako")}
+        className="inline-flex items-center gap-2 rounded-lg bg-[#ffdd00] px-4 py-2 text-[13px] font-medium text-black hover:brightness-95"
+      >
+        <Coffee size={15} /> Offrir un café <ExternalLink size={12} />
+      </button>
+      <p className="mt-2 text-[11px] text-muted">Ouvre buymeacoffee.com/heako dans votre navigateur.</p>
+    </Section>
+  );
+}
+
 const SECTIONS: [string, string][] = [
   ["keys", "Clé API"],
   ["costs", "Coûts"],
   ["storage", "Stockage"],
   ["about", "À propos"],
+  ["coffee", "Buy me a coffee"],
 ];
 
 export default function Settings() {
@@ -449,6 +464,7 @@ export default function Settings() {
         <CostsSection />
         <StorageSection />
         <AboutSection />
+        <CoffeeSection />
       </div>
     </div>
   );
