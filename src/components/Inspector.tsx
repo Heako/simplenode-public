@@ -6,7 +6,7 @@ import { ArrowRight, ChevronRight, Info, Loader2, Minus, Plus, RotateCcw, Slider
 import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { hasHistory, useFlow, useRunning, type FlowNode } from "@/lib/store";
-import { findModel, useModels } from "@/lib/spec";
+import { findModel, isRefPort, useModels } from "@/lib/spec";
 import { isAdvanced, optionLabel, settingLabel } from "@/lib/settingLabels";
 import { perSecond, useVideoDuration } from "@/lib/cost";
 import ProviderIcon from "./ProviderIcon";
@@ -211,7 +211,7 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const run = useFlow((s) => s.run);
   const stop = useFlow((s) => s.stop);
   const running = useRunning(id);
-  const refsWired = useFlowStore((s) => s.edges.some((e) => e.target === id && e.targetHandle === "refs"));
+  const refsWired = useFlowStore((s) => s.edges.some((e) => e.target === id && isRefPort(e.targetHandle)));
   const endpoint = (refsWired ? model?.editEndpoint : model?.textEndpoint) ?? model?.textEndpoint ?? model?.editEndpoint ?? null;
   // The endpoint of the other mode, whose settings are listed too.
   const other = [model?.textEndpoint, model?.editEndpoint].find((e) => e && e !== endpoint) ?? null;

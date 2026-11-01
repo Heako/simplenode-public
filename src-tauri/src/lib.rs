@@ -126,6 +126,18 @@ async fn run_graph(
     graph::run(&app, &fal, &state.http, nodes, edges, target).await
 }
 
+/// Crops as a Crop node's params say, as soon as they change: the node is live.
+/// Decoding a large image takes a moment, so off the main thread.
+#[tauri::command]
+async fn crop_image(app: AppHandle, value: String, params: std::collections::HashMap<String, String>) -> Result<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let spec = graph::crop_spec(&params)?;
+        Ok(storage::crop(&app, &value, &spec)?.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| error::AppError::Invalid(format!("Recadrage interrompu : {e}")))?
+}
+
 /// Stops the given nodes, or all running ones; their fal requests are cancelled.
 #[tauri::command]
 fn stop_nodes(ids: Option<Vec<String>>) {
@@ -174,6 +186,7 @@ pub fn run() {
             save_media,
             run_graph,
             stop_nodes,
+            crop_image,
             finalize_draft
         ])
         .run(tauri::generate_context!())

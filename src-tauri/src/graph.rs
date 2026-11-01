@@ -208,9 +208,15 @@ fn llm_params(node: &GraphNode) -> Ports {
     Ports::from([("model".to_owned(), param(node, "model").to_owned())])
 }
 
-fn crop_spec(node: &GraphNode) -> Result<CropSpec> {
-    let num = |k: &str, default: f64| param(node, k).parse::<f64>().unwrap_or(default);
-    match param(node, "aspect") {
+/// A Crop node's crop, from its params: also used live, outside a run.
+pub fn crop_spec(params: &Ports) -> Result<CropSpec> {
+    let param = |k: &str| params.get(k).map(String::as_str).unwrap_or_default();
+    let num = |k: &str, default: f64| param(k).parse::<f64>().unwrap_or(default);
+    // A box framed by hand, whatever its ratio; older nodes only have a ratio.
+    if param("box") == "1" {
+        return Ok(CropSpec::Percent { x: num("x", 0.0), y: num("y", 0.0), w: num("w", 100.0), h: num("h", 100.0) });
+    }
+    match param("aspect") {
         "" | "free" => Ok(CropSpec::Percent { x: num("x", 0.0), y: num("y", 0.0), w: num("w", 100.0), h: num("h", 100.0) }),
         ratio => {
             let (a, b) = ratio.split_once(':').ok_or_else(|| AppError::Invalid(format!("Format invalide : {ratio}")))?;
@@ -275,7 +281,7 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
         }
         "crop" => {
             let source = require(inputs, "image", "une image")?;
-            let path = storage::crop(app, source, &crop_spec(node)?)?;
+            let path = storage::crop(app, source, &crop_spec(&node.params)?)?;
             out.insert("image".into(), path.to_string_lossy().into_owned());
         }
         "angles" => {
@@ -503,11 +509,17 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             if prompt.trim().is_empty() {
                 return Err(AppError::Invalid("Prompt manquant".into()));
             }
+            // Numbered inputs (Image 1, Image 2…) in their order; `refs`
+            // for single-reference models and projects saved before.
+            let numbered = (1..=def.max_refs).filter_map(|i| first(inputs, &format!("ref{i}")));
             let refs = inputs
                 .get("refs")
-                .map(|v| v.iter().map(|r| storage::to_model_input(app, r)).collect::<Result<Vec<_>>>())
-                .transpose()?
-                .unwrap_or_default();
+                .into_iter()
+                .flatten()
+                .map(String::as_str)
+                .chain(numbered)
+                .map(|r| storage::to_model_input(app, r))
+                .collect::<Result<Vec<_>>>()?;
             let system = if def.category == Category::Llm { param(node, "system") } else { "" };
 
             let end_frame = first(inputs, "endFrame").map(|f| storage::to_model_input(app, f)).transpose()?;
@@ -710,6 +722,17 @@ mod tests {
 
     fn edge(source: &str, target: &str) -> GraphEdge {
         GraphEdge { source: source.into(), source_handle: "text".into(), target: target.into(), target_handle: "prompt".into() }
+    }
+
+    #[test]
+    fn crop_follows_the_framed_box_or_centers_the_ratio() {
+        let mut n = node("c");
+        n.params = Ports::from([("aspect".into(), "3:4".into())]);
+        assert!(matches!(crop_spec(&n.params).unwrap(), CropSpec::Aspect(r) if (r - 0.75).abs() < 1e-9));
+        for (k, v) in [("box", "1"), ("x", "10"), ("y", "5"), ("w", "50"), ("h", "60")] {
+            n.params.insert(k.into(), v.into());
+        }
+        assert!(matches!(crop_spec(&n.params).unwrap(), CropSpec::Percent { x, y, w, h } if (x, y, w, h) == (10.0, 5.0, 50.0, 60.0)));
     }
 
     #[test]

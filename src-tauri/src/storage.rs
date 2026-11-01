@@ -243,8 +243,8 @@ fn crop_rect(width: u32, height: u32, spec: &CropSpec) -> (u32, u32, u32, u32) {
         CropSpec::Percent { x, y, w: pw, h: ph } => {
             let x = (x.clamp(0.0, 100.0) / 100.0) * w;
             let y = (y.clamp(0.0, 100.0) / 100.0) * h;
-            let cw = (pw.clamp(1.0, 100.0) / 100.0 * w).min(w - x);
-            let ch = (ph.clamp(1.0, 100.0) / 100.0 * h).min(h - y);
+            let cw = (pw.clamp(0.1, 100.0) / 100.0 * w).min(w - x);
+            let ch = (ph.clamp(0.1, 100.0) / 100.0 * h).min(h - y);
             (x, y, cw, ch)
         }
     };

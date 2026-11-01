@@ -20,11 +20,13 @@ import {
   PORT_COLORS,
   angleShots,
   defaultParams,
+  findModel,
   gridSize,
   parseViews,
   portsCompatible,
   portsFor,
   promptVars,
+  refNumbers,
   type NodeData,
   type NodeKind,
   type NodeStatus,
@@ -116,6 +118,8 @@ interface FlowState {
   arrangeNodes: () => void;
   /** Makes an earlier result of a model node its current output again. */
   pickHistory: (nodeId: string, index: number) => void;
+  /** Makes this image the project's cover on the home page; null removes it. */
+  setCover: (nodeId: string, image: string | null) => void;
   /** Creates one image node per view received by an Aperçu des angles node. */
   extractViews: (nodeId: string) => void;
   /**
@@ -147,6 +151,30 @@ interface FlowState {
  * The selected nodes (or `id` when it isn't selected) with their links: those
  * between them, and those coming in from other nodes.
  */
+/**
+ * Projects saved before numbered reference inputs: the edges into a model's
+ * single `refs` input become Image 1, Image 2… in the order they were made.
+ */
+function numberRefs(nodes: FlowNode[], edges: Edge[]): { nodes: FlowNode[]; edges: Edge[] } {
+  const counts = new Map<string, number>();
+  const renamed = edges.map((e) => {
+    if (e.targetHandle !== "refs") return e;
+    const node = nodes.find((n) => n.id === e.target);
+    const model = node?.data.kind === "model" ? findModel(node.data.params.modelId) : undefined;
+    if (!model || model.maxRefs <= 1) return e;
+    const i = (counts.get(e.target) ?? 0) + 1;
+    counts.set(e.target, i);
+    return { ...e, targetHandle: `ref${i}` };
+  });
+  if (!counts.size) return { nodes, edges };
+  return {
+    edges: renamed,
+    nodes: nodes.map((n) =>
+      counts.has(n.id) ? { ...n, data: { ...n.data, params: { ...n.data.params, refs: String(counts.get(n.id)) } } } : n,
+    ),
+  };
+}
+
 function snapshot(nodes: FlowNode[], edges: Edge[], id?: string) {
   const selected = nodes.filter((n) => n.selected);
   const picked = id && !selected.some((n) => n.id === id) ? nodes.filter((n) => n.id === id) : selected;
@@ -421,6 +449,22 @@ export const useFlow = create<FlowState>()((set, get) => ({
       });
 
     if (link.side === "source") {
+      // An image dropped on a model taking several: the first free Image n,
+      // or a new one, rather than replacing Image 1.
+      const model = other.data.kind === "model" ? findModel(other.data.params.modelId) : undefined;
+      if (model && model.maxRefs > 1 && from.type === "image") {
+        const numbers = refNumbers(model, other.data.params);
+        const taken = (i: number) => get().edges.some((e) => e.target === otherId && e.targetHandle === `ref${i}`);
+        let free = numbers.find((i) => !taken(i));
+        if (free === undefined && numbers.length < model.maxRefs) {
+          free = numbers.length + 1;
+          get().setParam(otherId, "refs", String(free));
+        }
+        if (free !== undefined) {
+          onConnect({ source: link.nodeId, sourceHandle: link.handleId, target: otherId, targetHandle: `ref${free}` });
+          return true;
+        }
+      }
       const port = pick(portsFor(other.data).inputs.filter((p) => !p.id.startsWith("var:")));
       if (port) {
         onConnect({ source: link.nodeId, sourceHandle: link.handleId, target: otherId, targetHandle: port.id });
@@ -504,6 +548,18 @@ export const useFlow = create<FlowState>()((set, get) => ({
     set({ nodes: nodes.map((n) => (positions.has(n.id) ? { ...n, position: positions.get(n.id)! } : n)) });
   },
 
+  setCover: (nodeId, image) =>
+    set({
+      // One cover per project.
+      nodes: get().nodes.map((n) => {
+        const cover = n.id === nodeId ? (image ?? undefined) : undefined;
+        if (n.data.cover === cover) return n;
+        const data = { ...n.data, cover };
+        if (!cover) delete data.cover;
+        return { ...n, data };
+      }),
+    }),
+
   pickHistory: (nodeId, index) => {
     const node = get().nodes.find((n) => n.id === nodeId);
     const value = node?.data.history?.[index];
@@ -543,8 +599,10 @@ export const useFlow = create<FlowState>()((set, get) => ({
     return targets.length;
   },
 
-  openProject: ({ id, title, trashed, nodes, edges }) =>
-    set({ projectId: id, title, trashed, nodes: propagate(nodes, edges), edges, past: [], future: [], notice: null }),
+  openProject: ({ id, title, trashed, ...graph }) => {
+    const { nodes, edges } = numberRefs(graph.nodes, graph.edges);
+    set({ projectId: id, title, trashed, nodes: propagate(nodes, edges), edges, past: [], future: [], notice: null });
+  },
 
   closeProject: () => set({ projectId: null, nodes: [], edges: [], past: [], future: [], notice: null }),
 }));

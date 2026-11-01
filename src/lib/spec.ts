@@ -76,6 +76,8 @@ export interface NodeData extends Record<string, unknown> {
   history?: string[];
   /** User-chosen title; the node's default title when absent. */
   title?: string;
+  /** Image chosen as the project's cover on the home page. */
+  cover?: string;
 }
 
 export const PORT_COLORS: Record<PortType, string> = {
@@ -197,6 +199,17 @@ function layerName(params: Record<string, string>, port: string): string | undef
   }
 }
 
+/** Numbers of a model's reference inputs (Image 1, Image 2…), for models taking several. */
+export function refNumbers(model: ModelDef, params: Record<string, string>): number[] {
+  const n = Math.min(Math.max(Number(params.refs) || 1, 1), model.maxRefs);
+  return Array.from({ length: n }, (_, i) => i + 1);
+}
+
+/** A model input carrying reference images: the single `refs`, or a numbered `refN`. */
+export function isRefPort(id: string | null | undefined) {
+  return id === "refs" || /^ref\d+$/.test(id ?? "");
+}
+
 export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Port[]; outputs: Port[] } {
   switch (data.kind) {
     case "prompt":
@@ -277,7 +290,10 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       // Prompt and negative prompt first, then media, as in Weave.
       if (model?.negative) inputs.push({ id: "negative", label: "Prompt négatif", type: "text", multiple: true });
       const isVideo = model?.category === "video";
-      if (model && model.maxRefs > 0) {
+      if (model && model.maxRefs > 1) {
+        // One input per reference, so their order (image 1, image 2…) is explicit.
+        for (const i of refNumbers(model, data.params)) inputs.push({ id: `ref${i}`, label: `Image ${i}`, type: "image" });
+      } else if (model && model.maxRefs > 0) {
         inputs.push({
           id: "refs",
           label: model.refsLabel ?? (isVideo ? "Image de départ" : model.maxRefs > 1 ? `Références (≤${model.maxRefs})` : "Référence"),
@@ -406,6 +422,7 @@ export function defaultParams(kind: NodeKind, modelId?: string): Record<string, 
       const params: Record<string, string> = { modelId: modelId ?? "", prompt: "" };
       model?.params.forEach((p) => (params[p.key] = p.default));
       if (model?.category === "llm") params.system = "";
+      if (model && model.maxRefs > 1) params.refs = "1";
       return params;
     }
   }

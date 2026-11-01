@@ -3,7 +3,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
-import { Handle, NodeResizer, Position, useUpdateNodeInternals, useStore as useFlowStore, type NodeProps } from "@xyflow/react";
+import { Handle, NodeResizer, Position, useNodeId, useUpdateNodeInternals, useStore as useFlowStore, type NodeProps } from "@xyflow/react";
 import {
   ArrowRight,
   Camera,
@@ -41,14 +41,16 @@ import {
   Layers,
   Minus,
   Pencil,
+  Star,
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useFlow, useRunning, type FlowNode } from "@/lib/store";
 import ProviderIcon from "./ProviderIcon";
 import CompositorEditor, { type LayerInput } from "./CompositorEditor";
+import CropEditor from "./CropEditor";
 import TemplateEditor, { type TemplateEditorHandle, type VarDisplay } from "./TemplateEditor";
-import { ANGLE_LAYOUTS, MAX_GRID, MAX_LAYERS, compositorLayers, PORT_COLORS, varLabel, angleLayout, angleShots, findModel, gridSize, parseViews, listItems, llmOptions, portsFor, promptVars, recastParams, recastPrompt, useModels, type Port, type View } from "@/lib/spec";
+import { ANGLE_LAYOUTS, MAX_GRID, MAX_LAYERS, compositorLayers, refNumbers, PORT_COLORS, varLabel, angleLayout, angleShots, findModel, gridSize, parseViews, listItems, llmOptions, portsFor, promptVars, recastParams, recastPrompt, useModels, type Port, type View } from "@/lib/spec";
 import { optionLabel } from "@/lib/settingLabels";
 
 const field =
@@ -430,6 +432,11 @@ function Media({
   const [size, setSize] = useState<string | null>(null);
   const [full, setFull] = useState(false);
   const index = value && history ? history.indexOf(value) : -1;
+  // Images only: the home page shows the cover as a picture.
+  const nodeId = useNodeId();
+  const setCover = useFlow((s) => s.setCover);
+  const isCover = useFlow((s) => !!value && !!nodeId && s.nodes.find((n) => n.id === nodeId)?.data.cover === value);
+  const canCover = !!nodeId && !!value && valueKind(value) === "image";
   const browsable = !!onPick && !!history && history.length > 1 && index >= 0;
 
   return (
@@ -479,6 +486,15 @@ function Media({
             </>
           )}
           <div className="ml-auto flex gap-0.5">
+            {canCover && (
+              <button
+                className={toolButton}
+                onClick={() => setCover(nodeId, isCover ? null : value)}
+                title={isCover ? "Couverture du projet : cliquer pour revenir à la dernière image générée" : "Définir comme couverture du projet (page d'accueil)"}
+              >
+                <Star size={14} className={isCover ? "fill-amber-300 text-amber-300" : undefined} />
+              </button>
+            )}
             <DownloadButton path={value} name={name} className={toolButton} />
             {history && <DownloadAllButton paths={history} name={name} className={toolButton} />}
             <button className={toolButton} onClick={() => setFull(true)} title="Plein écran">
@@ -797,10 +813,39 @@ export function ModelNode(props: NodeProps<FlowNode>) {
           placeholder="Prompt négatif (optionnel) : ce que le modèle doit éviter"
         />
       )}
-      <div className="flex justify-end">
-        <RunStop id={id} running={running} title="Exécute ce modèle (les nœuds en amont déjà générés sont réutilisés)" />
+      <div className="flex items-center gap-1">
+        {model && model.maxRefs > 1 && <RefButtons id={id} max={model.maxRefs} count={refNumbers(model, data.params).length} />}
+        <div className="ml-auto">
+          <RunStop id={id} running={running} title="Exécute ce modèle (les nœuds en amont déjà générés sont réutilisés)" />
+        </div>
       </div>
     </NodeShell>
+  );
+}
+
+/** Adds or removes a numbered reference input (Image 1, Image 2…) of a model. */
+function RefButtons({ id, max, count }: { id: string; max: number; count: number }) {
+  const setParam = useFlow((s) => s.setParam);
+  const lastWired = useConnected(id, `ref${count}`);
+  return (
+    <>
+      <button
+        className="nodrag flex items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
+        disabled={count >= max}
+        onClick={() => setParam(id, "refs", String(count + 1))}
+        title={count >= max ? `${max} images au plus pour ce modèle` : "Ajoute une entrée image ; l'ordre des images est celui des entrées"}
+      >
+        <Plus size={13} /> Image
+      </button>
+      <button
+        className="nodrag grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
+        disabled={count <= 1 || lastWired}
+        onClick={() => setParam(id, "refs", String(count - 1))}
+        title={lastWired ? "Débranchez d'abord la dernière image" : "Retire la dernière entrée image"}
+      >
+        <Minus size={13} />
+      </button>
+    </>
   );
 }
 
@@ -853,103 +898,66 @@ export function ConcatNode(props: NodeProps<FlowNode>) {
   );
 }
 
-const ASPECTS: [string, string][] = [
-  ["free", "Libre"],
-  ["1:1", "1:1"],
-  ["16:9", "16:9"],
-  ["9:16", "9:16"],
-  ["4:3", "4:3"],
-  ["3:4", "3:4"],
-  ["3:2", "3:2"],
-  ["2:3", "2:3"],
-];
-
-/** Same math as `storage::crop_rect` in Rust, in percent of the source. */
-function cropBox(aspect: string, size: { w: number; h: number } | null, p: Record<string, string>) {
-  if (aspect === "free" || !size) {
-    const x = Number(p.x) || 0;
-    const y = Number(p.y) || 0;
-    return { x, y, w: Math.min(Number(p.w) || 100, 100 - x), h: Math.min(Number(p.h) || 100, 100 - y) };
-  }
-  const [a, b] = aspect.split(":").map(Number);
-  const ratio = a / b;
-  const [cw, ch] = size.w / size.h > ratio ? [size.h * ratio, size.h] : [size.w, size.w / ratio];
-  return { x: ((size.w - cw) / 2 / size.w) * 100, y: ((size.h - ch) / 2 / size.h) * 100, w: (cw / size.w) * 100, h: (ch / size.h) * 100 };
-}
-
+/**
+ * Frames the crop on the image itself. Live: the cropped image is made as
+ * soon as the frame is let go, and flows on without running anything.
+ */
 export function CropNode(props: NodeProps<FlowNode>) {
   const { id, data } = props;
-  const setParam = useFlow((s) => s.setParam);
   const patchNode = useFlow((s) => s.patchNode);
+  const setCover = useFlow((s) => s.setCover);
   const input = useInputValue(id, "image");
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
-  const aspect = data.params.aspect ?? "free";
-  const box = cropBox(aspect, size, data.params);
-  const showResult = data.status === "done" && data.outputs.image;
+  const [full, setFull] = useState(false);
+  const result = data.outputs.image;
+  const p = data.params;
+  // What the current result was made from: nothing to redo when it matches.
+  const key = JSON.stringify([input ?? "", p.box, p.aspect, p.x, p.y, p.w, p.h]);
+  useEffect(() => {
+    if (data.liveKey === key) return;
+    if (!input) {
+      if (result) patchNode(id, { outputs: {}, status: "idle", liveKey: key });
+      return;
+    }
+    const timer = setTimeout(() => {
+      invoke<string>("crop_image", { value: input, params: useFlow.getState().nodes.find((n) => n.id === id)?.data.params ?? p })
+        .then((image) => patchNode(id, { outputs: { image }, status: "done", error: undefined, liveKey: key }))
+        .catch((err) => patchNode(id, { status: "error", error: String(err), liveKey: key }));
+    }, 150);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  const toolbar = result && (
+    <>
+      <button
+        className={toolButton}
+        onClick={() => setCover(id, data.cover === result ? null : result)}
+        title={data.cover === result ? "Couverture du projet : cliquer pour revenir à la dernière image générée" : "Définir comme couverture du projet (page d'accueil)"}
+      >
+        <Star size={14} className={data.cover === result ? "fill-amber-300 text-amber-300" : undefined} />
+      </button>
+      <DownloadButton path={result} name="crop" className={toolButton} />
+      <button className={toolButton} onClick={() => setFull(true)} title="Plein écran">
+        <Maximize2 size={14} />
+      </button>
+    </>
+  );
 
   return (
-    <NodeShell {...props} icon={Crop} title="Crop">
-      {showResult ? (
-        <Media value={data.outputs.image} empty={null} />
+    <NodeShell {...props} icon={Crop} title="Crop" runnable={false}>
+      {input ? (
+        <CropEditor
+          src={mediaSrc(input)}
+          params={data.params}
+          toolbar={toolbar}
+          onChange={(patch) => patchNode(id, { params: { ...data.params, ...patch } })}
+        />
       ) : (
-        <div className="checker relative grid min-h-[160px] place-items-center overflow-hidden rounded-xl border border-line">
-          {input ? (
-            <div className="relative w-full">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={mediaSrc(input)}
-                alt=""
-                className="block w-full"
-                draggable={false}
-                onLoad={(e) => setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-              />
-              <div
-                className="absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.55)]"
-                style={{ left: `${box.x}%`, top: `${box.y}%`, width: `${box.w}%`, height: `${box.h}%` }}
-              />
-            </div>
-          ) : (
-            <span className="text-[11px] text-muted">Reliez une image (exécutée)</span>
-          )}
+        <div className="checker grid min-h-[160px] place-items-center rounded-xl border border-line text-[11px] text-muted">
+          Reliez une image (exécutée)
         </div>
       )}
-      <Select
-        label="Format"
-        value={aspect}
-        options={ASPECTS}
-        onChange={(v) => {
-          setParam(id, "aspect", v);
-          // Go back to the editable view; the old result no longer matches.
-          patchNode(id, { status: "idle" });
-        }}
-      />
-      {aspect === "free" && (
-        <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-          {(
-            [
-              ["x", "Gauche"],
-              ["y", "Haut"],
-              ["w", "Largeur"],
-              ["h", "Hauteur"],
-            ] as const
-          ).map(([key, label]) => (
-            <label key={key} className="block text-[10px] text-muted">
-              {label} {data.params[key]}%
-              <input
-                type="range"
-                min={key === "w" || key === "h" ? 1 : 0}
-                max={100}
-                value={data.params[key] ?? "0"}
-                onChange={(e) => {
-                  setParam(id, key, e.target.value);
-                  patchNode(id, { status: "idle" });
-                }}
-                className="nodrag block w-full accent-accent"
-              />
-            </label>
-          ))}
-        </div>
-      )}
+      {full && result && <Lightbox value={result} name="crop" onClose={() => setFull(false)} />}
     </NodeShell>
   );
 }

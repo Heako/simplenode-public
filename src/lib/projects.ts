@@ -26,8 +26,10 @@ export function newProjectId() {
   return nanoid(12);
 }
 
-/** Last image produced in the graph, used as the file's card thumbnail. */
+/** The image chosen as cover, else the last one produced in the graph: the file's card thumbnail. */
 export function thumbnailOf(nodes: FlowNode[]): string | null {
+  const cover = nodes.find((n) => n.data.cover)?.data.cover;
+  if (cover) return cover;
   for (const n of [...nodes].reverse()) {
     const value = Object.values(n.data.outputs).find((v) => /\.(png|jpe?g|webp|gif)$/i.test(v));
     if (value) return value;
