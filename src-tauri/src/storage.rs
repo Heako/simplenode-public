@@ -357,7 +357,9 @@ pub fn grid_crop(app: &AppHandle, value: &str, rows: u32, cols: u32, inset: f64)
         .into_iter()
         .map(|(x, y, w, h)| {
             let dest = new_path(app, "png")?;
-            img.view(x, y, w, h)
+            let tile = img.view(x, y, w, h).to_image();
+            let (tx, ty, tw, th) = gutter_trim(&tile);
+            image::imageops::crop_imm(&tile, tx, ty, tw, th)
                 .to_image()
                 .save(&dest)
                 .map_err(|e| AppError::Invalid(format!("Cannot write: {e}")))?;
@@ -366,9 +368,99 @@ pub fn grid_crop(app: &AppHandle, value: &str, rows: u32, cols: u32, inset: f64)
         .collect()
 }
 
+/// Most a gutter can take from one side of a tile.
+const GUTTER_MAX: f64 = 0.04;
+
+/// A row or column of a sheet's gutter: one flat color, near black or near white.
+fn is_gutter_line<I: Iterator<Item = u8>>(lumas: I) -> bool {
+    let (mut min, mut max, mut sum, mut n) = (u8::MAX, 0u8, 0u32, 0u32);
+    for l in lumas {
+        min = min.min(l);
+        max = max.max(l);
+        sum += u32::from(l);
+        n += 1;
+    }
+    if n == 0 {
+        return false;
+    }
+    let mean = sum / n;
+    max - min < 24 && !(40..=235).contains(&mean)
+}
+
+/// The tile without the gutter lines a generated sheet leaves on its edges
+/// (models draw dark or white bands between panels, which an even split
+/// keeps). Returns x, y, width, height; at most `GUTTER_MAX` per side.
+fn gutter_trim(tile: &image::RgbaImage) -> (u32, u32, u32, u32) {
+    let (w, h) = tile.dimensions();
+    let luma = |x: u32, y: u32| {
+        let p = tile.get_pixel(x, y);
+        ((u32::from(p[0]) * 299 + u32::from(p[1]) * 587 + u32::from(p[2]) * 114) / 1000) as u8
+    };
+    let max_x = (f64::from(w) * GUTTER_MAX) as u32;
+    let max_y = (f64::from(h) * GUTTER_MAX) as u32;
+    // Columns first, then rows between the kept columns only: where two
+    // bands of different colors meet, a full row would mix both.
+    let col = |x: u32| is_gutter_line((0..h).map(move |y| luma(x, y)));
+    let mut left = (0..max_x).take_while(|&x| col(x)).count() as u32;
+    let mut right = (0..max_x).take_while(|&i| col(w - 1 - i)).count() as u32;
+    // Then the seam: the band's edge, cut through a pixel, leaves a line or
+    // two blended with the picture, too varied to be a flat band but much
+    // darker (or lighter) than the picture just inside.
+    let col_mean = |x: u32| (0..h).map(|y| u32::from(luma(x, y))).sum::<u32>() / h.max(1);
+    left += seam(|i| col_mean(left + i));
+    right += seam(|i| col_mean(w - 1 - right - i));
+    let row = |y: u32| is_gutter_line((left..w - right).map(move |x| luma(x, y)));
+    let mut top = (0..max_y).take_while(|&y| row(y)).count() as u32;
+    let mut bottom = (0..max_y).take_while(|&i| row(h - 1 - i)).count() as u32;
+    let row_mean = |y: u32| (left..w - right).map(|x| u32::from(luma(x, y))).sum::<u32>() / (w - left - right).max(1);
+    top += seam(|i| row_mean(top + i));
+    bottom += seam(|i| row_mean(h - 1 - bottom - i));
+    (left, top, w - left - right, h - top - bottom)
+}
+
+/// Seam lines on one side, at most `SEAM_MAX`: `mean(i)` is the mean luma of
+/// the i-th line inward. A line is a seam when it stands out from the
+/// picture a few lines further in.
+const SEAM_MAX: u32 = 2;
+
+fn seam(mean: impl Fn(u32) -> u32) -> u32 {
+    let inner = mean(SEAM_MAX + 2);
+    (0..SEAM_MAX)
+        .take_while(|&i| {
+            let line = mean(i);
+            (inner >= line + 30 && line * 10 < inner * 7) || (line >= inner + 30 && line > 200)
+        })
+        .count() as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gutters_are_trimmed_but_not_the_picture() {
+        // A 100×100 tile: a 3 px black band on the left, a 2 px white band on top, a busy picture elsewhere.
+        let tile = image::RgbaImage::from_fn(100, 100, |x, y| {
+            if x < 3 {
+                image::Rgba([5, 5, 5, 255])
+            } else if y < 2 {
+                image::Rgba([250, 250, 250, 255])
+            } else {
+                let v = ((x * 7 + y * 13) % 200) as u8 + 30;
+                image::Rgba([v, v / 2, 255 - v, 255])
+            }
+        });
+        assert_eq!(gutter_trim(&tile), (3, 2, 97, 98));
+        // A blended seam line (darker, but not flat) next to the picture goes too.
+        let seamed = image::RgbaImage::from_fn(100, 100, |x, y| {
+            let v = if y == 0 { 40 + (x % 30) as u8 } else { 140 + ((x * 3 + y) % 40) as u8 };
+            image::Rgba([v, v, v, 255])
+        });
+        assert_eq!(gutter_trim(&seamed), (0, 1, 100, 99));
+        // An all-black tile loses 4 % per side at most.
+        let dark = image::RgbaImage::from_pixel(100, 100, image::Rgba([0, 0, 0, 255]));
+        assert_eq!(gutter_trim(&dark), (4, 4, 92, 92));
+    }
 
     #[test]
     fn grid_cells_cover_the_image_row_major() {

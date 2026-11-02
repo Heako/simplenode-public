@@ -455,7 +455,14 @@ function Media({
   const browsable = !!onPick && !!history && history.length > 1 && index >= 0;
 
   return (
-    <div className="checker relative grid min-h-[180px] place-items-center overflow-hidden rounded-xl border border-line">
+    // With media: no border, which drew a halo around the image's corners.
+    // No translateZ / will-change here: in the zoomed canvas WebKit then
+    // rasterizes the layer at a lower resolution and the image goes blurry.
+    <div
+      className={`checker relative isolate grid min-h-[180px] place-items-center overflow-hidden rounded-md ${
+        value ? "" : "border border-line"
+      }`}
+    >
       {value && valueKind(value) === "audio" ? (
         <audio src={mediaSrc(value)} className="nodrag w-full px-3" controls />
       ) : value && valueKind(value) === "video" ? (
@@ -1526,10 +1533,11 @@ export function AnglesNode(props: NodeProps<FlowNode>) {
         <div className="mb-1 text-[10px] text-muted">Shots, in the order of the sheet</div>
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
           {shots.map((shotId, i) => (
-            <label key={i} className="relative block">
-              <span className="pointer-events-none absolute top-1/2 left-1.5 -translate-y-1/2 text-[9px] text-muted">{i + 1}</span>
+            <label key={i} className="flex min-w-0 items-center gap-1 rounded-md border border-line bg-panel-2 pl-1.5 focus-within:border-accent">
+              {/* Beside the select, not over it: macOS draws native selects without their left padding. */}
+              <span className="shrink-0 text-[9px] text-muted tabular-nums">{i + 1}</span>
               <select
-                className="nodrag w-full truncate rounded-md border border-line bg-panel-2 py-1 pr-1 pl-4 text-[10px] text-fg outline-none focus:border-accent"
+                className="nodrag min-w-0 flex-1 truncate bg-transparent py-1 pr-1 text-[10px] text-fg outline-none"
                 value={shotId}
                 onChange={(e) => update("shots", JSON.stringify(shots.map((s, j) => (j === i ? e.target.value : s))))}
               >
@@ -1558,14 +1566,17 @@ function Gallery({
   cols,
   selected,
   onSelect,
+  square = false,
 }: {
   views: View[];
   cols: number;
   selected?: number;
   onSelect?: (index: number) => void;
+  /** Square thumbnails, cropped to their center; otherwise 16:9. */
+  square?: boolean;
 }) {
   return (
-    <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
+    <div className={`grid ${square ? "gap-2 p-0.5" : "gap-1"}`} style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
       {views.map((v, i) => (
         <div key={i} className="group/media relative">
           <button
@@ -1573,11 +1584,14 @@ function Gallery({
             disabled={!onSelect}
             onClick={() => onSelect?.(i)}
             title={v.label}
-            className={`nodrag relative block w-full overflow-hidden rounded-md border-2 ${i === selected ? "border-accent" : "border-transparent"} ${onSelect ? "cursor-pointer hover:border-accent/50" : "cursor-default"}`}
+            // A ring, not a border: a transparent border shows the button's own (black) background.
+            className={`nodrag relative isolate block w-full overflow-hidden rounded bg-transparent p-0 transition-shadow ${
+              i === selected ? "ring-2 ring-accent ring-offset-2 ring-offset-panel" : onSelect ? "hover:ring-1 hover:ring-white/40" : ""
+            } ${onSelect ? "cursor-pointer" : "cursor-default"}`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={mediaSrc(v.path)} alt="" className="block aspect-video w-full object-cover" draggable={false} />
-            <span className="absolute bottom-0.5 left-0.5 max-w-[95%] truncate rounded bg-black/65 px-1 text-[9px]">
+            <img src={mediaSrc(v.path)} alt="" className={`block w-full object-cover ${square ? "aspect-square" : "aspect-video"}`} draggable={false} />
+            <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent px-1.5 pt-3 pb-1 text-left text-[9px] text-white">
               {i + 1}. {v.label}
             </span>
           </button>
@@ -1603,10 +1617,10 @@ export function AnglePickNode(props: NodeProps<FlowNode>) {
   const selected = Math.min(Number(data.params.selected) || 0, Math.max(views.length - 1, 0));
 
   return (
-    <NodeShell {...props} icon={Images} title="Angle picker" runnable={false} cardWidth={340}>
+    <NodeShell {...props} icon={Images} title="Angle picker" runnable={false} cardWidth={340} fitHeight>
       {views.length ? (
         <>
-          <Gallery views={views} cols={galleryCols(views.length)} selected={selected} onSelect={(i) => setParam(id, "selected", String(i))} />
+          <Gallery views={views} cols={galleryCols(views.length)} selected={selected} onSelect={(i) => setParam(id, "selected", String(i))} square />
           <div className="flex items-center gap-2 text-[11px] text-muted">
             <span className="min-w-0 flex-1 truncate">
               Output: <span className="text-fg">{views[selected].label}</span> — click a shot to choose it.
