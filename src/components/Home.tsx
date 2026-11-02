@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Copy,
   Drama,
+  ImageIcon,
   FolderOpen,
   LayoutGrid,
   LayoutTemplate,
@@ -42,6 +43,11 @@ const TITLES: Record<Tab, string> = {
   settings: "Settings",
 };
 
+const WORKFLOW_GROUPS: [WorkflowDef["category"], string][] = [
+  ["image", "Image"],
+  ["video", "Video"],
+];
+
 /** Ready-made graphs; picking one creates a file that starts from it. */
 /** `compact`: the short version shown above the files, with a link to the full tab. */
 function Workflows({ onPick, compact, onMore }: { onPick: (workflow: WorkflowDef) => void; compact?: boolean; onMore?: () => void }) {
@@ -59,37 +65,79 @@ function Workflows({ onPick, compact, onMore }: { onPick: (workflow: WorkflowDef
       ) : (
         <p className="mt-2 text-[13px] text-muted">A workflow creates a new, already wired file: just import your media and run.</p>
       )}
-      <div className={`${compact ? "mt-4" : "mt-6"} grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5`}>
-        {WORKFLOWS.map((w) => (
-          <button
-            key={w.id}
-            disabled={!ready}
-            onClick={() => onPick(w)}
-            className="group flex flex-col rounded-xl border border-line bg-panel p-5 text-left hover:border-[#4a4a52] disabled:opacity-50"
-          >
-            <div className="flex items-center gap-2.5">
-              <div className="grid h-8 w-8 place-items-center rounded-lg bg-panel-2">
-                <Drama size={16} className="text-accent" />
-              </div>
-              <span className="text-[14px] font-medium">{w.title}</span>
+      {compact ? (
+        // Home page: one scrolling ribbon of compact cards, image workflows first.
+        <div className="-mx-1 mt-4 flex snap-x gap-3 overflow-x-auto px-1 pb-2">
+          {WORKFLOW_GROUPS.flatMap(([category, label]) =>
+            WORKFLOWS.filter((w) => w.category === category).map((w) => {
+              const Icon = category === "image" ? ImageIcon : Drama;
+              return (
+                <button
+                  key={w.id}
+                  disabled={!ready}
+                  onClick={() => onPick(w)}
+                  title={w.description}
+                  className="group flex w-72 shrink-0 snap-start flex-col rounded-xl border border-line bg-panel p-4 text-left hover:border-[#4a4a52] disabled:opacity-50"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-panel-2">
+                      <Icon size={14} className="text-accent" />
+                    </div>
+                    <span className="min-w-0 truncate text-[13px] font-medium">{w.title}</span>
+                  </div>
+                  <p className="mt-2 line-clamp-5 text-[12px] leading-relaxed text-muted">{w.description}</p>
+                  <span className="mt-auto flex items-center justify-between pt-3 text-[11px]">
+                    <span className="rounded bg-panel-2 px-1.5 py-0.5 text-muted">{label}</span>
+                    <span className="flex items-center gap-1 text-fg opacity-70 group-hover:opacity-100">
+                      Use <ArrowRight size={12} />
+                    </span>
+                  </span>
+                </button>
+              );
+            }),
+          )}
+        </div>
+      ) : (
+        WORKFLOW_GROUPS.map(([category, label]) => {
+        const Icon = category === "image" ? ImageIcon : Drama;
+        return (
+          <section key={category} className={compact ? "mt-4" : "mt-6"}>
+            <h3 className="mb-3 text-[11px] font-medium tracking-wide text-muted uppercase">{label}</h3>
+            <div className="grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5">
+              {WORKFLOWS.filter((w) => w.category === category).map((w) => (
+                <button
+                  key={w.id}
+                  disabled={!ready}
+                  onClick={() => onPick(w)}
+                  className="group flex flex-col rounded-xl border border-line bg-panel p-5 text-left hover:border-[#4a4a52] disabled:opacity-50"
+                >
+                  <div className="flex items-center gap-2.5">
+                    <div className="grid h-8 w-8 place-items-center rounded-lg bg-panel-2">
+                      <Icon size={16} className="text-accent" />
+                    </div>
+                    <span className="text-[14px] font-medium">{w.title}</span>
+                  </div>
+                  <p className="mt-3 text-[12px] leading-relaxed text-muted">{w.description}</p>
+                  {!compact && (
+                    <ol className="mt-3 space-y-1 text-[12px] text-muted">
+                      {w.steps.map((step, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span className="text-fg tabular-nums">{i + 1}.</span>
+                          {step}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  <span className="mt-4 flex items-center gap-1.5 self-end text-[12px] text-fg opacity-70 group-hover:opacity-100">
+                    Use <ArrowRight size={13} />
+                  </span>
+                </button>
+              ))}
             </div>
-            <p className="mt-3 text-[12px] leading-relaxed text-muted">{w.description}</p>
-            {!compact && (
-              <ol className="mt-3 space-y-1 text-[12px] text-muted">
-                {w.steps.map((step, i) => (
-                  <li key={i} className="flex gap-2">
-                    <span className="text-fg tabular-nums">{i + 1}.</span>
-                    {step}
-                  </li>
-                ))}
-              </ol>
-            )}
-            <span className="mt-4 flex items-center gap-1.5 self-end text-[12px] text-fg opacity-70 group-hover:opacity-100">
-              Utiliser <ArrowRight size={13} />
-            </span>
-          </button>
-        ))}
-      </div>
+          </section>
+        );
+      })
+      )}
     </>
   );
 }
