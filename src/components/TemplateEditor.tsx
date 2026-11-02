@@ -42,7 +42,7 @@ interface Props {
 const TOKEN = /\{([A-Za-z0-9_]+)\}/g;
 
 function valueText(value: string | null | undefined) {
-  return value === undefined ? "non reliée" : value === null ? "en attente" : value.trim() || "vide";
+  return value === undefined ? "not connected" : value === null ? "pending" : value.trim() || "empty";
 }
 
 function chipText(name: string, value: string | null | undefined, display: VarDisplay) {
@@ -180,7 +180,7 @@ const TemplateEditor = forwardRef<TemplateEditorHandle, Props>(function Template
   const emitted = useRef(value);
   const lastValue = useRef(value);
   // Last caret position, kept across blur: buttons outside the editor
-  // ("Réinsérer", "Ajouter une variable") insert there.
+  // ("Insert again", "Add a variable") insert there.
   const lastPos = useRef<number | null>(null);
 
   const [menu, setMenu] = useState<MentionMenu | null>(null);
@@ -309,7 +309,7 @@ const TemplateEditor = forwardRef<TemplateEditorHandle, Props>(function Template
             // Keep focus (and the caret) in the editor while clicking an item.
             onMouseDown={(e) => e.preventDefault()}
           >
-            <div className="px-2.5 pt-1 pb-1.5 text-[10px] text-muted">Insérer une variable</div>
+            <div className="px-2.5 pt-1 pb-1.5 text-[10px] text-muted">Insert a variable</div>
             {menu.items.map((item, i) => (
               <button
                 key={"create" in item ? "__create" : item.name}
@@ -320,7 +320,7 @@ const TemplateEditor = forwardRef<TemplateEditorHandle, Props>(function Template
               >
                 {"create" in item ? (
                   <>
-                    <Plus size={12} className="text-muted" /> Nouvelle variable
+                    <Plus size={12} className="text-muted" /> New variable
                   </>
                 ) : (
                   <>

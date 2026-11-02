@@ -10,7 +10,9 @@ import {
   type XYPosition,
 } from "@xyflow/react";
 import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
 import { nanoid } from "nanoid";
+import { BILLING_ACK_KEY, BILLING_NOTICE, isBytePlusKind } from "./byteplus";
 import { create } from "zustand";
 import { arrange } from "./layout";
 import { propagate } from "./live";
@@ -35,9 +37,44 @@ import {
 
 export type FlowNode = Node<NodeData>;
 
+/**
+ * The first time a run would launch a BytePlus node, reminds that BytePlus
+ * bills the user's own account. False when the user declines.
+ */
+async function acknowledgeBytePlusBilling(nodes: FlowNode[], edges: Edge[], targetId?: string): Promise<boolean> {
+  let acked = false;
+  try {
+    acked = localStorage.getItem(BILLING_ACK_KEY) === "1";
+  } catch {}
+  if (acked) return true;
+  let scope: Set<string> | null = null;
+  if (targetId) {
+    scope = new Set([targetId]);
+    const stack = [targetId];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      for (const e of edges) {
+        if (e.target === cur && !scope.has(e.source)) {
+          scope.add(e.source);
+          stack.push(e.source);
+        }
+      }
+    }
+  }
+  if (!nodes.some((n) => isBytePlusKind(n.data.kind) && (!scope || scope.has(n.id)))) return true;
+  const ok = await ask(BILLING_NOTICE, { title: "BytePlus ModelArk", kind: "info", okLabel: "Got it, run", cancelLabel: "Cancel" });
+  if (ok) {
+    try {
+      localStorage.setItem(BILLING_ACK_KEY, "1");
+    } catch {}
+  }
+  return ok;
+}
+
 /** Nodes that generate media with a model and keep every result in `history`. */
 export function hasHistory(node: FlowNode) {
-  return node.data.kind === "model" || node.data.kind === "recast" || node.data.kind === "addAudio";
+  const { kind } = node.data;
+  return kind === "model" || kind === "recast" || kind === "addAudio" || kind === "bpSeedance" || kind === "bpSeedream";
 }
 
 /** A connection dragged from a port and dropped somewhere other than a port. */
@@ -54,6 +91,8 @@ export interface NodeStatusEvent {
   status: NodeStatus;
   outputs?: Record<string, string>;
   error?: string;
+  /** The error came before any generation was billed. */
+  unbilled?: boolean;
 }
 
 interface Snapshot {
@@ -133,7 +172,8 @@ interface FlowState {
   checkpoint: () => void;
   undo: () => void;
   redo: () => void;
-  run: (targetId?: string) => Promise<void>;
+  /** False when the run didn't start (already running, or the user declined). */
+  run: (targetId?: string) => Promise<boolean>;
   /** Stops these nodes, or every running one; Rust cancels their fal requests. */
   stop: (ids?: string[]) => void;
   applyStatus: (event: NodeStatusEvent) => void;
@@ -251,7 +291,7 @@ export function useRunning(id: string) {
 export const useFlow = create<FlowState>()((set, get) => ({
   projectId: null,
   trashed: false,
-  title: "Sans titre",
+  title: "Untitled",
   nodes: [],
   edges: [],
   runs: [],
@@ -514,7 +554,9 @@ export const useFlow = create<FlowState>()((set, get) => ({
   run: async (targetId) => {
     // Several runs can go at once; Rust shares the nodes they have in common.
     const key = targetId ?? "*";
-    if (get().runs.includes(key)) return;
+    if (get().runs.includes(key)) return false;
+    if (!(await acknowledgeBytePlusBilling(get().nodes, get().edges, targetId))) return false;
+    if (get().runs.includes(key)) return false;
     set({ runs: [...get().runs, key] });
     const { nodes, edges } = get();
     try {
@@ -534,18 +576,19 @@ export const useFlow = create<FlowState>()((set, get) => ({
     } finally {
       set({ runs: get().runs.filter((r) => r !== key) });
     }
+    return true;
   },
 
   stop: (ids) => {
     invoke("stop_nodes", { ids: ids ?? null }).catch((err) => set({ notice: String(err) }));
   },
 
-  applyStatus: ({ id, status, outputs, error }) => {
+  applyStatus: ({ id, status, outputs, error, unbilled }) => {
     const node = get().nodes.find((n) => n.id === id);
     // Model results join the node's history, so earlier ones stay reachable.
     const media = outputs && node && hasHistory(node) ? (outputs.image ?? outputs.video ?? outputs.audio) : undefined;
     const history = media ? [...(node!.data.history ?? []).filter((h) => h !== media), media] : undefined;
-    get().patchNode(id, { status, error, ...(outputs ? { outputs } : {}), ...(history ? { history } : {}) });
+    get().patchNode(id, { status, error, unbilled: unbilled || undefined, ...(outputs ? { outputs } : {}), ...(history ? { history } : {}) });
   },
 
   arrangeNodes: () => {

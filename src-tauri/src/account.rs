@@ -28,9 +28,9 @@ const PRICING_BATCH: usize = 50;
 const EXTRA_ENDPOINTS: &[(&str, &str)] = &[
     ("Video Describer", "fal-ai/video-understanding"),
     ("Seedance 2.5 Draft → 1080p", "bytedance/seedance-2.5/draft/complete"),
-    ("Recast : découpe de la vidéo", crate::fal::TRIM_VIDEO_ENDPOINT),
-    ("Recast : assemblage", crate::fal::MERGE_VIDEOS_ENDPOINT),
-    ("Ajouter le son", crate::fal::MERGE_AUDIO_VIDEO_ENDPOINT),
+    ("Recast: video split", crate::fal::TRIM_VIDEO_ENDPOINT),
+    ("Recast: merge", crate::fal::MERGE_VIDEOS_ENDPOINT),
+    ("Add sound", crate::fal::MERGE_AUDIO_VIDEO_ENDPOINT),
 ];
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq, Hash)]
@@ -40,6 +40,14 @@ pub enum KeyKind {
     Main,
     /// Optional, BILLING-scoped: reads spend.
     Billing,
+    /// BytePlus ModelArk API key: Seedance and Seedream.
+    #[serde(rename = "byteplus")]
+    BytePlus,
+    /// BytePlus Access Key and Secret Key: the portrait library.
+    #[serde(rename = "byteplusAk")]
+    BytePlusAk,
+    #[serde(rename = "byteplusSk")]
+    BytePlusSk,
 }
 
 impl KeyKind {
@@ -47,6 +55,9 @@ impl KeyKind {
         match self {
             KeyKind::Main => "fal",
             KeyKind::Billing => "fal-billing",
+            KeyKind::BytePlus => "byteplus",
+            KeyKind::BytePlusAk => "byteplus-ak",
+            KeyKind::BytePlusSk => "byteplus-sk",
         }
     }
 }
@@ -71,7 +82,7 @@ pub fn init(config_dir: PathBuf) {
 }
 
 fn key_path() -> Result<&'static PathBuf> {
-    KEY_FILE.get().ok_or_else(|| AppError::Invalid("stockage des clés non initialisé".into()))
+    KEY_FILE.get().ok_or_else(|| AppError::Invalid("key storage not initialized".into()))
 }
 
 /// The key file, loaded once; keychain entries are moved into it the first time.
@@ -141,6 +152,18 @@ pub fn main_key() -> Result<String> {
     }
 }
 
+/// BytePlus is optional: without its key the app runs as with fal alone.
+pub fn byteplus_key() -> Result<String> {
+    stored(KeyKind::BytePlus)?.ok_or(AppError::MissingBytePlusKey)
+}
+
+pub fn byteplus_aksk() -> Result<(String, String)> {
+    match (stored(KeyKind::BytePlusAk)?, stored(KeyKind::BytePlusSk)?) {
+        (Some(ak), Some(sk)) => Ok((ak, sk)),
+        _ => Err(AppError::MissingBytePlusAkSk),
+    }
+}
+
 /// Spend needs a BILLING-scoped key; fall back to the main key, which works
 /// when it was created with the FULL preset.
 fn billing_key() -> Result<String> {
@@ -167,6 +190,9 @@ pub struct KeyStatus {
     /// "saved", "env" or null.
     main: Option<&'static str>,
     billing: bool,
+    byteplus: bool,
+    byteplus_ak: bool,
+    byteplus_sk: bool,
 }
 
 pub fn key_status() -> Result<KeyStatus> {
@@ -177,15 +203,21 @@ pub fn key_status() -> Result<KeyStatus> {
     } else {
         None
     };
-    Ok(KeyStatus { main, billing: stored(KeyKind::Billing)?.is_some() })
+    Ok(KeyStatus {
+        main,
+        billing: stored(KeyKind::Billing)?.is_some(),
+        byteplus: stored(KeyKind::BytePlus)?.is_some(),
+        byteplus_ak: stored(KeyKind::BytePlusAk)?.is_some(),
+        byteplus_sk: stored(KeyKind::BytePlusSk)?.is_some(),
+    })
 }
 
 async fn platform_get(http: &Client, key: &str, path: &str, query: &[(&str, String)]) -> Result<Value> {
     let res = http.get(format!("{PLATFORM_URL}{path}")).header(AUTHORIZATION, format!("Key {key}")).query(query).send().await?;
     match res.status() {
         s if s.is_success() => Ok(res.json().await?),
-        StatusCode::UNAUTHORIZED => Err(AppError::Fal("clé refusée (invalide ou révoquée)".into())),
-        StatusCode::FORBIDDEN => Err(AppError::Fal("cette clé n'a pas la permission requise".into())),
+        StatusCode::UNAUTHORIZED => Err(AppError::Fal("key refused (invalid or revoked)".into())),
+        StatusCode::FORBIDDEN => Err(AppError::Fal("this key lacks the required permission".into())),
         s => {
             let body: Value = res.json().await.unwrap_or(Value::Null);
             Err(AppError::Fal(body["detail"].as_str().map(str::to_owned).unwrap_or_else(|| s.to_string())))
@@ -198,10 +230,11 @@ pub async fn test_key(http: &Client, kind: KeyKind) -> Result<()> {
     let key = match kind {
         KeyKind::Main => main_key()?,
         KeyKind::Billing => stored(KeyKind::Billing)?.ok_or(AppError::MissingKey)?,
+        _ => return Err(AppError::Invalid("Test BytePlus keys from their section".into())),
     };
     match kind {
         KeyKind::Main => platform_get(http, &key, "/models/pricing", &[("endpoint_id", "fal-ai/flux/schnell".into())]).await?,
-        KeyKind::Billing => platform_get(http, &key, "/models/usage", &[("expand", "summary".into())]).await?,
+        _ => platform_get(http, &key, "/models/usage", &[("expand", "summary".into())]).await?,
     };
     Ok(())
 }
@@ -311,7 +344,7 @@ pub struct Spend {
 }
 
 /// `YYYY-MM-DD` for a Unix day number (Howard Hinnant's civil-from-days).
-fn civil_date(days_since_epoch: i64) -> String {
+pub(crate) fn civil_date(days_since_epoch: i64) -> String {
     let z = days_since_epoch + 719_468;
     let era = z.div_euclid(146_097);
     let doe = z.rem_euclid(146_097);
@@ -344,7 +377,7 @@ pub async fn spend(http: &Client, days: u32) -> Result<Spend> {
     let query = [("start", since.clone()), ("expand", "summary".into()), ("timezone", "UTC".into())];
     let body = platform_get(http, &key, "/models/usage", &query).await.map_err(|e| match e {
         AppError::Fal(msg) if msg.contains("permission") => AppError::Fal(
-            "la clé n'a pas accès à la facturation. Créez une clé avec le preset BILLING (ou FULL) sur fal.ai et ajoutez-la comme clé de facturation".into(),
+            "this key has no access to billing. Create a key with the BILLING (or FULL) preset on fal.ai and add it as the billing key".into(),
         ),
         other => other,
     })?;

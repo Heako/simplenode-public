@@ -28,7 +28,7 @@ function link(source: FlowNode, sourceHandle: string, target: FlowNode, targetHa
 
 /** Source video and character imports wired into a Recast node in `mode`, shown in a Preview. */
 function recastGraph(mode: string) {
-  const video = node("image", 0, 0, { title: "Vidéo source", params: { path: "", media: "video" } });
+  const video = node("image", 0, 0, { title: "Source video", params: { path: "", media: "video" } });
   const character = node("image", 0, 330, { title: "Personnage", params: { path: "", media: "image" } });
   const recast = node("recast", 400, 60, { params: { ...recastParams(mode), prompt: recastPrompt(mode), segment: "10" } });
   const preview = node("preview", 820, 60);
@@ -45,16 +45,16 @@ function recastGraph(mode: string) {
 export const WORKFLOWS: Workflow[] = [
   {
     id: "recast-replace",
-    title: "Remplacer un personnage",
-    description: "Votre personnage prend la place de la personne filmée. La scène, la lumière, la caméra et le son de la vidéo sont conservés.",
-    steps: ["Importez la vidéo source", "Importez l'image de votre personnage", "Exécutez le nœud Recast"],
+    title: "Replace a character",
+    description: "Your character takes the place of the person on screen. The video's scene, lighting, camera and sound are kept.",
+    steps: ["Import the source video", "Import your character's image", "Run the Recast node"],
     build: () => recastGraph("replace"),
   },
   {
     id: "recast-motion",
-    title: "Transfert de mouvement",
-    description: "Votre personnage, dans son propre décor, reproduit les gestes et les mouvements de caméra de la vidéo.",
-    steps: ["Importez la vidéo de référence", "Importez l'image de votre personnage", "Exécutez le nœud Recast"],
+    title: "Motion transfer",
+    description: "Your character, in their own setting, performs the gestures and camera moves of the video.",
+    steps: ["Import the reference video", "Import your character's image", "Run the Recast node"],
     build: () => recastGraph("motion"),
   },
 ];

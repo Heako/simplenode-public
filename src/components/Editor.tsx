@@ -40,8 +40,8 @@ function RunCard() {
     const count = purgeResults();
     setNotice(
       count
-        ? `Résultats vidés sur ${count} modèle${count > 1 ? "s" : ""} (annulable avec ⌘Z).`
-        : "Aucun résultat à vider.",
+        ? `Results cleared on ${count} model${count > 1 ? "s" : ""} (undo with ⌘Z).`
+        : "No results to clear.",
     );
   }
 
@@ -49,14 +49,14 @@ function RunCard() {
     <div className="absolute top-4 right-4 z-10 flex items-center gap-1.5 rounded-2xl border border-line bg-panel/95 p-1.5 shadow-xl backdrop-blur">
       <button
         className="grid h-7 w-7 place-items-center rounded-lg text-muted hover:text-fg"
-        title="Vider le canvas (annulable avec ⌘Z)"
+        title="Clear the canvas (undo with ⌘Z)"
         onClick={clear}
       >
         <Trash2 size={13} />
       </button>
       <button
         className="grid h-7 w-7 place-items-center rounded-lg text-muted hover:text-fg"
-        title={`Vider les résultats ${scoped ? "des modèles sélectionnés" : "de tous les modèles"} : image et historique (annulable avec ⌘Z)`}
+        title={`Clear the results of ${scoped ? "the selected models" : "every model"}: image and history (undo with ⌘Z)`}
         onClick={purge}
       >
         <Eraser size={13} />
@@ -64,20 +64,20 @@ function RunCard() {
       {busy && (
         <button
           className="flex items-center gap-1.5 rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/10"
-          title="Arrête tous les nœuds en cours et annule leurs requêtes fal"
+          title="Stops every running node and cancels their requests"
           onClick={() => stop()}
         >
-          <Square size={11} fill="currentColor" /> Tout arrêter
+          <Square size={11} fill="currentColor" /> Stop all
         </button>
       )}
       <button
         className="flex items-center gap-1.5 rounded-lg bg-fg px-3 py-1.5 text-xs font-medium text-bg disabled:opacity-50"
         disabled={running}
-        title="Exécute les nœuds qui n'ont pas encore de résultat ; les nœuds payants déjà rendus ne sont pas relancés"
+        title="Runs the nodes that have no result yet; paid nodes already rendered are not run again"
         onClick={() => run()}
       >
         <Play size={12} fill="currentColor" />
-        {running ? "Exécution…" : "Tout exécuter"}
+        {running ? "Running…" : "Run all"}
       </button>
     </div>
   );
@@ -114,24 +114,24 @@ function BottomBar({ tool, setTool }: { tool: Tool; setTool: (t: Tool) => void }
 
   return (
     <div className="absolute bottom-5 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-2xl border border-line bg-panel/95 p-1.5 shadow-xl backdrop-blur">
-      <button className={`${btn} ${tool === "select" ? "!bg-fg !text-bg" : ""}`} onClick={() => setTool("select")} title="Sélection (V)">
+      <button className={`${btn} ${tool === "select" ? "!bg-fg !text-bg" : ""}`} onClick={() => setTool("select")} title="Select (V)">
         <MousePointer2 size={16} />
       </button>
       <button className={`${btn} ${tool === "pan" ? "!bg-fg !text-bg" : ""}`} onClick={() => setTool("pan")} title="Main (H)">
         <Hand size={16} />
       </button>
       <div className="mx-1 h-6 w-px bg-line" />
-      <button className={btn} onClick={undo} disabled={!canUndo} title="Annuler (⌘Z)">
+      <button className={btn} onClick={undo} disabled={!canUndo} title="Undo (⌘Z)">
         <Undo2 size={16} />
       </button>
-      <button className={btn} onClick={redo} disabled={!canRedo} title="Rétablir (⇧⌘Z)">
+      <button className={btn} onClick={redo} disabled={!canRedo} title="Redo (⇧⌘Z)">
         <Redo2 size={16} />
       </button>
       <div className="mx-1 h-6 w-px bg-line" />
       <button
         className={btn}
         onClick={arrange}
-        title={selection >= 2 ? `Réorganiser les ${selection} nœuds sélectionnés (⇧L)` : "Réorganiser tous les nœuds (⇧L)"}
+        title={selection >= 2 ? `Arrange the ${selection} selected nodes (⇧L)` : "Arrange all nodes (⇧L)"}
       >
         <AlignHorizontalDistributeCenter size={16} />
       </button>
@@ -163,7 +163,7 @@ function Notice() {
   return (
     <div className="absolute top-16 right-4 z-20 flex max-w-sm items-start gap-2 rounded-xl border border-red-500/40 bg-panel px-3 py-2.5 text-xs shadow-xl">
       <span className="flex-1 leading-relaxed text-red-200">{notice}</span>
-      <button className="text-muted hover:text-fg" onClick={() => setNotice(null)} title="Fermer">
+      <button className="text-muted hover:text-fg" onClick={() => setNotice(null)} title="Close">
         ✕
       </button>
     </div>

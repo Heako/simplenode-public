@@ -6,8 +6,9 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
+import { bpSeedanceEstimate, bpSeedreamCost, SEEDANCE_DURATIONS, SEEDANCE_RATIOS } from "./byteplus";
 import { perSecond, seedanceEstimate } from "./cost";
-import { DRAFT_DAYS, dayMonth, draftExpiry, finalizeDraft, finalizeEstimate } from "./draft";
+import { DRAFT_DAYS, FinalizeError, dayMonth, draftExpiry, draftProvider, finalizeDraft, finalizeEstimate } from "./draft";
 import { listProjects, loadProject, newProjectId, saveProject } from "./projects";
 import { findModel, isRefPort, libraryItems, portsFor, useModels, type NodeKind } from "./spec";
 import { useFlow, type FlowNode } from "./store";
@@ -35,7 +36,36 @@ interface Price {
 }
 
 /** Same set as `graph::is_remote`: paid, and not re-run once they have a result. */
-const PAID = new Set<NodeKind>(["model", "enhancer", "describer", "videoDescriber", "angles", "recast", "addAudio"]);
+const PAID = new Set<NodeKind>(["model", "enhancer", "describer", "videoDescriber", "angles", "recast", "addAudio", "bpPortrait", "bpSeedance", "bpSeedream"]);
+
+/** Settings of the BytePlus nodes, for list_node_types (they are not registry models). */
+const BYTEPLUS_SETTINGS: Partial<Record<NodeKind, { key: string; options: string[]; default: string; note?: string }[]>> = {
+  bpPortrait: [
+    { key: "name", options: [], default: "", note: "Portrait name in the library, e.g. \"Nora\"" },
+    { key: "group", options: [], default: "SimpleNode", note: "Portrait group (created if missing)" },
+  ],
+  bpSeedance: [
+    { key: "duration", options: SEEDANCE_DURATIONS.map(([v]) => v), default: "5", note: "-1 = auto" },
+    { key: "ratio", options: SEEDANCE_RATIOS.map(([v]) => v), default: "adaptive", note: "forced to adaptive with a start image" },
+    { key: "audio", options: ["true", "false"], default: "true" },
+    { key: "draft", options: ["true", "false"], default: "true", note: "true: 480p draft, to finalize with finalize_draft" },
+    { key: "resolution", options: ["480p", "720p", "1080p"], default: "1080p", note: "without draft only" },
+    { key: "seed", options: [], default: "", note: "integer, empty = random" },
+  ],
+  bpSeedream: [
+    { key: "model", options: ["pro", "flash"], default: "pro" },
+    { key: "size", options: ["2K", "1K"], default: "2K" },
+  ],
+};
+
+/** How the BytePlus nodes take their inputs, for list_node_types. */
+const BYTEPLUS_NOTES: Partial<Record<NodeKind, string>> = {
+  bpPortrait:
+    "Uploads an AI character image (resembling no real person, no logo) to the BytePlus portrait library, then waits for the review. Output \"portrait\" = asset://… Needs the fal key (image hosting) and the BytePlus AK/SK.",
+  bpSeedance:
+    "Seedance 2.5 on BytePlus. Two exclusive modes: references (inputs portraits then refs; in the prompt, \"Image 1\", \"Image 2\"… in that order) OR start/end image (start, end). A realistic face is only accepted through a validated portrait or a BytePlus Seedream text-to-image output under 30 days old.",
+  bpSeedream: "Seedream 5.0 on BytePlus. Without references, the output is a trusted input for Seedance (BytePlus) for 30 days.",
+};
 const PER_RUN_UNITS = new Set(["image", "images", "video", "videos", "units", "requests", "generations"]);
 /** LLM calls and ffmpeg jobs on fal: a cent at most. */
 const SMALL = 0.01;
@@ -115,6 +145,15 @@ async function nodeCost(node: FlowNode): Promise<number | null> {
       }
       return null;
     }
+    // No per-call price is documented: portraits use the account's Advanced Creation Rights quota.
+    case "bpPortrait":
+      return 0;
+    case "bpSeedance":
+      return bpSeedanceEstimate(p).cost;
+    case "bpSeedream": {
+      const refs = useFlow.getState().edges.filter((e) => e.target === node.id && e.targetHandle === "refs").length;
+      return bpSeedreamCost(p, refs);
+    }
     default:
       return 0;
   }
@@ -152,18 +191,20 @@ async function estimate(target?: string) {
 }
 
 function titleOf(n: FlowNode) {
-  return n.data.title || (n.data.kind === "model" ? (findModel(n.data.params.modelId)?.label ?? n.data.params.modelId) : n.data.kind);
+  if (n.data.title) return n.data.title;
+  if (n.data.kind === "model") return findModel(n.data.params.modelId)?.label ?? n.data.params.modelId;
+  return libraryItems([]).find((i) => i.kind === n.data.kind)?.label ?? n.data.kind;
 }
 
 const money = (v: number) => `$${v.toFixed(2)}`;
 
 function requireProject() {
-  if (!useFlow.getState().projectId) throw new Error("Aucun projet ouvert : utilisez open_project ou create_project.");
+  if (!useFlow.getState().projectId) throw new Error("No project open: use open_project or create_project.");
 }
 
 function requireNode(id: unknown): FlowNode {
   const node = useFlow.getState().nodes.find((n) => n.id === id);
-  if (!node) throw new Error(`Nœud introuvable : ${String(id)}`);
+  if (!node) throw new Error(`Node not found: ${String(id)}`);
   return node;
 }
 
@@ -194,6 +235,7 @@ function graph() {
         // A Seedance 2.5 draft that finalize_draft can render in 1080p.
         ...(n.data.outputs.draftId && {
           draft: {
+            provider: draftProvider(n.data),
             finalize_cost_estimate: finalizeEstimate(n.data)?.cost ?? null,
             expires: draftExpiry(n.data)?.toISOString() ?? null,
             finalizing: !!n.data.finalizing,
@@ -214,11 +256,16 @@ async function spend(cost: number) {
   const left = budget - useMcpSpend.getState().spent;
   if (cost > left + 1e-9) {
     throw new Error(
-      `Refusé : coût estimé ${money(cost)}, budget restant ${money(left)} (plafond ${money(budget)} par session, réglable dans SimpleNode → Réglages → MCP). Demandez à l'utilisateur.`,
+      `Refused: estimated cost ${money(cost)}, budget left ${money(left)} (cap of ${money(budget)} per session, set in SimpleNode → Settings → MCP). Ask the user.`,
     );
   }
   useMcpSpend.setState({ spent: useMcpSpend.getState().spent + cost });
   return left - cost;
+}
+
+/** Gives back to the session budget what a request refused before generating had counted. */
+function refund(cost: number) {
+  if (cost > 0) useMcpSpend.setState({ spent: Math.max(0, useMcpSpend.getState().spent - cost) });
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -238,7 +285,7 @@ const TOOLS: Record<string, (args: Record<string, unknown>) => Promise<unknown>>
   },
 
   async create_project({ title }) {
-    const project = { id: newProjectId(), title: String(title || "Sans titre"), updatedAt: 0, thumbnail: null, trashed: false, nodes: [], edges: [] };
+    const project = { id: newProjectId(), title: String(title || "Untitled"), updatedAt: 0, thumbnail: null, trashed: false, nodes: [], edges: [] };
     await saveProject(project);
     useFlow.getState().openProject(project);
     return { id: project.id, title: project.title };
@@ -264,16 +311,21 @@ const TOOLS: Record<string, (args: Record<string, unknown>) => Promise<unknown>>
           max_reference_images: def.maxRefs,
           settings: def.params.map((p) => ({ key: p.key, options: p.options, default: p.default })),
         }),
+        ...(BYTEPLUS_SETTINGS[item.kind] && {
+          provider: "BytePlus ModelArk",
+          usage: BYTEPLUS_NOTES[item.kind],
+          settings: BYTEPLUS_SETTINGS[item.kind],
+        }),
       };
     });
   },
 
   async get_model_settings({ model_id }) {
     const def = findModel(String(model_id));
-    if (!def) throw new Error(`Modèle inconnu : ${String(model_id)}`);
+    if (!def) throw new Error(`Unknown model: ${String(model_id)}`);
     const endpoints = [def.textEndpoint, def.editEndpoint].filter(Boolean) as string[];
     const lists = await Promise.all(endpoints.map((endpoint) => invoke("model_settings", { endpoint }).then((settings) => ({ endpoint, settings }))));
-    return { model_id: def.id, note: "Réglez-les avec update_node, params \"x:<key>\".", endpoints: lists };
+    return { model_id: def.id, note: "Set them with update_node, params \"x:<key>\".", endpoints: lists };
   },
 
   async add_node(args) {
@@ -281,7 +333,7 @@ const TOOLS: Record<string, (args: Record<string, unknown>) => Promise<unknown>>
     const kind = String(args.kind) as NodeKind;
     const modelId = args.model_id ? String(args.model_id) : undefined;
     const known = libraryItems(useModels.getState().models).some((i) => i.kind === kind && (kind !== "model" || i.modelId === modelId));
-    if (!known) throw new Error(`Type de nœud inconnu : ${kind}${modelId ? ` / ${modelId}` : ""} (voir list_node_types)`);
+    if (!known) throw new Error(`Unknown node type: ${kind}${modelId ? ` / ${modelId}` : ""} (see list_node_types)`);
     const s = useFlow.getState();
     const id = s.addNode(kind, placement(args), modelId);
     const node = requireNode(id);
@@ -312,13 +364,13 @@ const TOOLS: Record<string, (args: Record<string, unknown>) => Promise<unknown>>
     requireNode(target);
     const outputs = portsFor(from.data).outputs;
     const handle = source_handle ? String(source_handle) : outputs[0]?.id;
-    if (!handle) throw new Error("Ce nœud n'a pas de sortie");
+    if (!handle) throw new Error("This node has no output");
     if (target_handle) {
       const c = { source: String(source), sourceHandle: handle, target: String(target), targetHandle: String(target_handle) };
-      if (!s.isValidConnection(c)) throw new Error("Liaison impossible : ports incompatibles, inexistants ou boucle (voir get_graph)");
+      if (!s.isValidConnection(c)) throw new Error("Cannot connect: incompatible or missing ports, or a loop (see get_graph)");
       s.onConnect(c);
     } else if (!s.autoConnect({ nodeId: String(source), handleId: handle, side: "source" }, String(target))) {
-      throw new Error("Aucune entrée compatible sur le nœud cible");
+      throw new Error("No compatible input on the target node");
     }
     return graph().edges.filter((e) => e.target === target);
   },
@@ -350,32 +402,48 @@ const TOOLS: Record<string, (args: Record<string, unknown>) => Promise<unknown>>
     requireProject();
     const target = node_id ? requireNode(node_id).id : undefined;
     const s = useFlow.getState();
-    if (s.runs.includes(target ?? "*")) throw new Error("Cette exécution est déjà en cours : utilisez wait_for_run.");
+    if (s.runs.includes(target ?? "*")) throw new Error("This run is already in progress: use wait_for_run.");
     const est = await estimate(target);
     if (est.unknown.length) {
       throw new Error(
-        `Coût non estimable pour : ${est.unknown.join(", ")}. Lancez-les vous-même dans SimpleNode (le plafond de dépenses ne peut pas être vérifié).`,
+        `Cost can't be estimated for: ${est.unknown.join(", ")}. Run them yourself in SimpleNode (the spending cap can't be checked).`,
       );
     }
     const left = await spend(est.total);
-    void s.run(target);
+    // Whatever was refused before generating (or didn't start) goes back to the budget.
+    void s.run(target).then((started) => {
+      if (!started) return refund(est.total);
+      const after = useFlow.getState().nodes;
+      for (const n of est.nodes) {
+        const data = after.find((a) => a.id === n.id)?.data;
+        if (data?.status === "error" && data.unbilled) refund(n.estimated_cost ?? 0);
+      }
+    });
     return { started: true, estimated_cost: est.total, nodes: est.nodes, budget_left: left, next: "wait_for_run" };
   },
 
   async finalize_draft({ node_id }) {
     requireProject();
     const node = requireNode(node_id);
-    if (!node.data.outputs.draftId) throw new Error("Ce nœud n'a pas de brouillon Seedance à finaliser (lancez d'abord Seedance 2.5 Draft).");
+    if (!node.data.outputs.draftId)
+      throw new Error("This node has no Seedance draft to finalize (run Seedance 2.5 Draft first, or Seedance 2.5 (BytePlus) with draft=true).");
     const expiry = draftExpiry(node.data);
-    if (expiry && expiry.getTime() <= Date.now()) throw new Error(`Brouillon expiré le ${dayMonth(expiry)} : fal ne le garde que ${DRAFT_DAYS} jours.`);
+    if (expiry && expiry.getTime() <= Date.now())
+      throw new Error(`Draft expired on ${dayMonth(expiry)}: ${draftProvider(node.data)} only keeps it ${DRAFT_DAYS} days.`);
     const est = finalizeEstimate(node.data);
-    if (!est) throw new Error("Coût non estimable pour ce brouillon. Finalisez-le vous-même dans SimpleNode.");
+    if (!est) throw new Error("Cost can't be estimated for this draft. Finalize it yourself in SimpleNode.");
     const left = await spend(est.cost);
-    const video = await finalizeDraft(node.id);
+    let video: string;
+    try {
+      video = await finalizeDraft(node.id);
+    } catch (err) {
+      if (err instanceof FinalizeError && err.unbilled) refund(est.cost);
+      throw err;
+    }
     return {
       video,
       estimated_cost: est.cost,
-      ...(est.auto && { note: `Durée « auto » : estimée sur ${est.seconds} s.` }),
+      ...(est.auto && { note: `\"Auto\" duration: estimated at ${est.seconds} s.` }),
       budget_left: left,
     };
   },
@@ -392,15 +460,32 @@ const TOOLS: Record<string, (args: Record<string, unknown>) => Promise<unknown>>
     };
     while (busy() && Date.now() - start < limit) await sleep(500);
     const g = graph();
+    const { budget } = await invoke<McpStatus>("mcp_status");
     return {
       finished: !busy(),
+      budget_left: budget - useMcpSpend.getState().spent,
       nodes: g.nodes.map(({ id, title, status, error, outputs }) => ({ id, title, status, error, outputs: outputs.filter((o) => o.value) })),
+    };
+  },
+
+  async portrait_status({ node_id }) {
+    const node = requireNode(node_id);
+    if (node.data.kind !== "bpPortrait") throw new Error("This node is not an AI Portrait (BytePlus).");
+    const assetId = node.data.outputs.assetId;
+    if (!assetId) return { status: "not_sent", error: node.data.error ?? null, next: "run" };
+    const { status } = await invoke<{ id: string; status: string }>("byteplus_asset_status", { assetId });
+    return {
+      status,
+      uri: status === "Active" ? `asset://${assetId}` : null,
+      node_status: node.data.status,
+      error: node.data.error ?? null,
+      ...(status === "Processing" && { next: "Review in progress: run the node again to follow the review and get the portrait output." }),
     };
   },
 
   async stop({ node_id }) {
     useFlow.getState().stop(node_id ? [requireNode(node_id).id] : undefined);
-    return { stopped: node_id ?? "tout" };
+    return { stopped: node_id ?? "all" };
   },
 };
 
@@ -410,7 +495,7 @@ export function listenToMcp() {
     const { id, tool, args } = payload;
     try {
       const fn = TOOLS[tool];
-      if (!fn) throw new Error(`Outil inconnu : ${tool}`);
+      if (!fn) throw new Error(`Unknown tool: ${tool}`);
       const result = await fn(args ?? {});
       await invoke("mcp_reply", { id, ok: true, result: result ?? null });
     } catch (err) {

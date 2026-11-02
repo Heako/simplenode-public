@@ -2,20 +2,51 @@ use serde::{Serialize, Serializer};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("Clé fal.ai manquante : ajoutez-la depuis la page d'accueil (« Clé fal.ai » en bas à gauche)")]
+    #[error("Missing fal.ai key: add it in Settings → fal.ai API key")]
     MissingKey,
     #[error("{0}")]
     Invalid(String),
-    #[error("fal.ai : {0}")]
+    #[error("fal.ai: {0}")]
     Fal(String),
-    #[error("Réseau : {0}")]
+    #[error("Add your BytePlus key in Settings → BytePlus ModelArk")]
+    MissingBytePlusKey,
+    #[error("BytePlus portraits require an Access Key and a Secret Key: add them in Settings → BytePlus ModelArk")]
+    MissingBytePlusAkSk,
+    #[error("BytePlus: {0}")]
+    BytePlus(String),
+    /// The provider turned the request down before generating anything.
+    #[error("{0}")]
+    Refused(String),
+    #[error("Network: {0}")]
     Http(#[from] reqwest::Error),
-    #[error("Fichier : {0}")]
+    #[error("File: {0}")]
     Io(#[from] std::io::Error),
-    #[error("Trousseau : {0}")]
+    #[error("Keychain: {0}")]
     Keyring(#[from] keyring::Error),
     #[error(transparent)]
     Tauri(#[from] tauri::Error),
+}
+
+impl AppError {
+    /// Failed before any provider started (and billed) a generation: a
+    /// missing key, an invalid input, or a request the provider refused.
+    pub fn unbilled(&self) -> bool {
+        matches!(self, AppError::MissingKey | AppError::MissingBytePlusKey | AppError::MissingBytePlusAkSk | AppError::Invalid(_) | AppError::Refused(_))
+    }
+}
+
+/// Error of a command whose cost the MCP budget counted: says whether that
+/// amount can be given back.
+#[derive(Serialize)]
+pub struct CommandError {
+    message: String,
+    unbilled: bool,
+}
+
+impl From<AppError> for CommandError {
+    fn from(e: AppError) -> Self {
+        Self { unbilled: e.unbilled(), message: e.to_string() }
+    }
 }
 
 // Commands return errors to JS as plain strings.

@@ -3,7 +3,17 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { dollars } from "@/lib/cost";
-import { DRAFT_DAYS, dayMonth, draftExpired, draftExpiry, finalizeDraft, finalizeEstimate } from "@/lib/draft";
+import { DRAFT_DAYS, dayMonth, draftExpired, draftExpiry, draftProvider, finalizeDraft, finalizeEstimate } from "@/lib/draft";
+import {
+  SEEDANCE_DURATIONS,
+  SEEDANCE_MAX_REFS,
+  SEEDANCE_RATIOS,
+  bpSeedanceEstimate,
+  bpSeedreamCost,
+  missingKey,
+  trustExpiry,
+  useBytePlusKeys,
+} from "@/lib/byteplus";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Handle, NodeResizer, Position, useNodeId, useUpdateNodeInternals, useStore as useFlowStore, type NodeProps } from "@xyflow/react";
 import {
@@ -44,6 +54,9 @@ import {
   Minus,
   Pencil,
   Star,
+  ScanFace,
+  TriangleAlert,
+  KeyRound,
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -115,13 +128,13 @@ function RunStop({ id, running, title }: { id: string; running: boolean; title: 
     <button
       className="nodrag flex items-center gap-1.5 rounded-lg border border-red-500/50 px-3 py-1.5 text-[12px] text-red-300 hover:bg-red-500/10"
       onClick={() => stop([id])}
-      title="Arrête ce nœud et annule sa requête fal"
+      title="Stops this node and cancels its request"
     >
-      <Square size={11} fill="currentColor" /> Arrêter
+      <Square size={11} fill="currentColor" /> Stop
     </button>
   ) : (
     <button className="nodrag flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:border-accent" onClick={() => run(id)} title={title}>
-      <ArrowRight size={13} /> Exécuter
+      <ArrowRight size={13} /> Run
     </button>
   );
 }
@@ -221,7 +234,7 @@ function NodeShell({
               }}
             />
           ) : (
-            <div className="truncate text-[13px] font-medium" onDoubleClick={() => setRenaming(id)} title="Double-clic pour renommer">
+            <div className="truncate text-[13px] font-medium" onDoubleClick={() => setRenaming(id)} title="Double-click to rename">
               {data.title || title}
             </div>
           )}
@@ -233,7 +246,7 @@ function NodeShell({
             <button
               className="nodrag grid h-6 w-6 place-items-center rounded-md text-red-300 hover:bg-red-500/10"
               onClick={() => stop([id])}
-              title="Arrêter ce nœud (annule sa requête fal)"
+              title="Stop this node (cancels its request)"
             >
               <Square size={11} fill="currentColor" />
             </button>
@@ -241,7 +254,7 @@ function NodeShell({
             <button
               className="nodrag grid h-6 w-6 place-items-center rounded-md text-muted hover:bg-panel-2 hover:text-fg"
               onClick={() => run(id)}
-              title="Exécuter jusqu'à ce nœud"
+              title="Run up to this node"
             >
               <Play size={12} fill="currentColor" />
             </button>
@@ -322,7 +335,7 @@ function DownloadButton({ path, name, className }: { path: string; name?: string
   }
 
   return (
-    <button type="button" onClick={download} title={state === "error" ? "Échec de l'enregistrement" : "Télécharger"} className={className}>
+    <button type="button" onClick={download} title={state === "error" ? "Save failed" : "Download"} className={className}>
       {state === "done" ? <Check size={14} /> : state === "error" ? <X size={14} /> : <Download size={14} />}
     </button>
   );
@@ -339,7 +352,7 @@ function DownloadAllButton({ paths, name, className }: { paths: string[]; name?:
 
   async function download(e: ReactMouseEvent) {
     e.stopPropagation();
-    const dir = await open({ directory: true, title: `Choisir un dossier pour les ${local.length} générations` });
+    const dir = await open({ directory: true, title: `Choose a folder for the ${local.length} generations` });
     if (typeof dir !== "string") return;
     setState("busy");
     const base = slugify(name || "simplenode");
@@ -359,7 +372,7 @@ function DownloadAllButton({ paths, name, className }: { paths: string[]; name?:
       type="button"
       onClick={download}
       disabled={state === "busy"}
-      title={state === "error" ? "Échec de l'enregistrement" : `Tout télécharger (${local.length})`}
+      title={state === "error" ? "Save failed" : `Download all (${local.length})`}
       className={className}
     >
       {state === "busy" ? (
@@ -396,7 +409,7 @@ function Lightbox({ value, name, onClose }: { value: string; name?: string; onCl
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 px-8 pt-16 pb-8" onClick={onClose}>
       <div className="absolute top-4 right-4 flex gap-1" onClick={(e) => e.stopPropagation()}>
         <DownloadButton path={value} name={name} className={toolButton} />
-        <button className={toolButton} onClick={onClose} title="Fermer (Échap)">
+        <button className={toolButton} onClick={onClose} title="Close (Esc)">
           <X size={16} />
         </button>
       </div>
@@ -471,7 +484,7 @@ function Media({
         <div className="absolute inset-x-0 top-0 flex items-center gap-0.5 bg-gradient-to-b from-black/55 to-transparent px-1.5 pt-1.5 pb-4">
           {browsable && (
             <>
-              <button className={`${toolButton} disabled:opacity-30`} disabled={index === 0} onClick={() => onPick(index - 1)} title="Génération précédente">
+              <button className={`${toolButton} disabled:opacity-30`} disabled={index === 0} onClick={() => onPick(index - 1)} title="Previous generation">
                 <ChevronLeft size={15} />
               </button>
               <span className="min-w-9 text-center text-[11px] text-white/90 tabular-nums">
@@ -481,7 +494,7 @@ function Media({
                 className={`${toolButton} disabled:opacity-30`}
                 disabled={index === history.length - 1}
                 onClick={() => onPick(index + 1)}
-                title="Génération suivante"
+                title="Next generation"
               >
                 <ChevronRight size={15} />
               </button>
@@ -492,14 +505,14 @@ function Media({
               <button
                 className={toolButton}
                 onClick={() => setCover(nodeId, isCover ? null : value)}
-                title={isCover ? "Couverture du projet : cliquer pour revenir à la dernière image générée" : "Définir comme couverture du projet (page d'accueil)"}
+                title={isCover ? "Project cover: click to go back to the last generated image" : "Set as the project cover (home page)"}
               >
                 <Star size={14} className={isCover ? "fill-amber-300 text-amber-300" : undefined} />
               </button>
             )}
             <DownloadButton path={value} name={name} className={toolButton} />
             {history && <DownloadAllButton paths={history} name={name} className={toolButton} />}
-            <button className={toolButton} onClick={() => setFull(true)} title="Plein écran">
+            <button className={toolButton} onClick={() => setFull(true)} title="Full screen">
               <Maximize2 size={14} />
             </button>
           </div>
@@ -529,9 +542,9 @@ function TextOut({ value }: { value?: string }) {
 }
 
 const DISPLAYS: [VarDisplay, string][] = [
-  ["both", "Source + valeur"],
+  ["both", "Source + value"],
   ["source", "Source"],
-  ["value", "Valeur"],
+  ["value", "Value"],
 ];
 
 export function PromptNode(props: NodeProps<FlowNode>) {
@@ -584,19 +597,19 @@ export function PromptNode(props: NodeProps<FlowNode>) {
         vars={vars}
         values={values}
         display={(data.params.display as VarDisplay) || "both"}
-        placeholder="Décrivez ce que vous voulez générer… (@ pour une variable)"
+        placeholder="Describe what you want to generate… (@ for a variable)"
         onChange={(template) => setParam(id, "text", template)}
         onCreateVar={createVar}
       />
       {unused.length > 0 && (
         <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted">
-          Non utilisées :
+          Unused:
           {unused.map((name) => (
             <span key={name} className="nodrag flex items-center rounded-md border border-dashed border-[#e8b04a]/40 text-[10px] text-[#f3c977]">
-              <button className="py-0.5 pl-1.5" onClick={() => editor.current?.insertVar(name)} title="Réinsérer au curseur">
+              <button className="py-0.5 pl-1.5" onClick={() => editor.current?.insertVar(name)} title="Insert again at the cursor">
                 {varLabel(name)}
               </button>
-              <button className="px-1 py-0.5 opacity-60 hover:opacity-100" onClick={() => deleteVar(name)} title="Supprimer la variable et son lien">
+              <button className="px-1 py-0.5 opacity-60 hover:opacity-100" onClick={() => deleteVar(name)} title="Delete the variable and its link">
                 <X size={10} />
               </button>
             </span>
@@ -607,13 +620,13 @@ export function PromptNode(props: NodeProps<FlowNode>) {
         <button
           className="nodrag flex shrink-0 items-center gap-1 rounded-md px-1 py-0.5 text-[11px] whitespace-nowrap text-muted hover:text-fg"
           onClick={addVar}
-          title="Ajoute une entrée dont la valeur s'insère dans le texte, là où se trouve le curseur"
+          title="Adds an input whose value is inserted in the text, where the cursor is"
         >
-          <Plus size={12} /> Ajouter une variable
+          <Plus size={12} /> Add a variable
         </button>
         {vars.length > 0 && (
           <label className="ml-auto flex min-w-0 items-center gap-1.5 text-[10px] text-muted">
-            Affichage
+            Display
             <select
               className="nodrag max-w-[130px] min-w-0 rounded-md border border-line bg-panel-2 px-1.5 py-0.5 text-[11px] text-fg outline-none"
               value={data.params.display || "both"}
@@ -653,19 +666,19 @@ export function ListNode(props: NodeProps<FlowNode>) {
               className="nodrag accent-accent"
               checked={i === selected}
               onChange={() => setParam(id, "selected", String(i))}
-              title="Utiliser cet élément"
+              title="Use this item"
             />
             <input
               className={`${field} !py-1.5 ${i === selected ? "!border-accent/60" : ""}`}
               value={item}
-              placeholder={`Élément ${i + 1}`}
+              placeholder={`Item ${i + 1}`}
               onChange={(e) => save(items.map((v, j) => (j === i ? e.target.value : v)))}
             />
             <button
               className="nodrag grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted hover:text-fg disabled:opacity-30"
               disabled={items.length <= 1}
               onClick={() => save(items.filter((_, j) => j !== i), i < selected ? selected - 1 : selected)}
-              title="Retirer"
+              title="Remove"
             >
               <X size={12} />
             </button>
@@ -676,7 +689,7 @@ export function ListNode(props: NodeProps<FlowNode>) {
         className="nodrag flex w-full items-center justify-center gap-1 rounded-lg border border-dashed border-line py-1.5 text-[11px] text-muted hover:border-accent hover:text-fg"
         onClick={() => save([...items, ""])}
       >
-        <Plus size={12} /> Ajouter un élément
+        <Plus size={12} /> Add an item
       </button>
     </NodeShell>
   );
@@ -690,7 +703,7 @@ export function ImageNode(props: NodeProps<FlowNode>) {
   async function pick() {
     const picked = await open({
       multiple: false,
-      filters: [{ name: "Images, vidéos et audio", extensions: [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS] }],
+      filters: [{ name: "Images, videos and audio", extensions: [...IMAGE_EXTENSIONS, ...VIDEO_EXTENSIONS, ...AUDIO_EXTENSIONS] }],
     });
     if (typeof picked !== "string") return;
     setBusy(true);
@@ -713,12 +726,12 @@ export function ImageNode(props: NodeProps<FlowNode>) {
   }
 
   return (
-    <NodeShell {...props} icon={ImageUp} title={props.data.params.label || "Import"} subtitle={props.data.params.label ? "Plan extrait" : undefined} runnable={false}>
+    <NodeShell {...props} icon={ImageUp} title={props.data.params.label || "Import"} subtitle={props.data.params.label ? "Extracted shot" : undefined} runnable={false}>
       {path ? (
         <>
           <Media value={path} name={props.data.params.label || undefined} empty={null} />
           <button className="nodrag text-[11px] text-muted hover:text-fg" onClick={pick} disabled={busy}>
-            {busy ? "Import…" : "Remplacer le fichier"}
+            {busy ? "Importing…" : "Replace the file"}
           </button>
         </>
       ) : (
@@ -727,7 +740,7 @@ export function ImageNode(props: NodeProps<FlowNode>) {
             empty={
               <>
                 <ImageUp size={20} />
-                {busy ? "Import…" : "Cliquer pour importer"}
+                {busy ? "Importing…" : "Click to import"}
               </>
             }
           />
@@ -750,36 +763,18 @@ export function ModelNode(props: NodeProps<FlowNode>) {
   const isAudio = model?.category === "audio";
   const running = useRunning(id);
   const pickHistory = useFlow((s) => s.pickHistory);
-  const draftId = data.outputs.draftId;
   // Set while a draft renders in 1080p, from the button or from Claude Code (MCP).
   const finalizing = !!data.finalizing;
-  const finalCost = draftId ? finalizeEstimate(data) : null;
-  const expiry = draftId ? draftExpiry(data) : null;
-  const expired = draftId ? draftExpired(data) : false;
-
-  async function finalize() {
-    const price = finalCost
-      ? `Coût estimé : ~${dollars(finalCost.cost)}${finalCost.auto ? ` (durée « auto » : estimée sur ${finalCost.seconds} s)` : ""}, facturé par fal.`
-      : "Coût non estimable.";
-    const ok = await ask(`Rendre ce brouillon en 1080p ?\n\n${price}`, {
-      title: "Finaliser en 1080p",
-      kind: "warning",
-      okLabel: "Finaliser",
-      cancelLabel: "Annuler",
-    });
-    // Errors are shown on the node.
-    if (ok) finalizeDraft(id).catch(() => {});
-  }
 
   return (
     <NodeShell {...props} icon={isLlm ? Sparkles : isVideo ? Clapperboard : isAudio ? AudioLines : ImageIcon} title={model?.label ?? data.params.modelId}
       subtitle={model?.provider}
       modelId={data.params.modelId}
       llmModel={data.params.model}>
-      {!model && <div className="text-xs text-muted">Modèle introuvable dans le registre.</div>}
+      {!model && <div className="text-xs text-muted">Model not found in the registry.</div>}
       {isLlm ? (
         <>
-          <textarea className={`${GROW} ${field} nowheel h-14 resize-none`} value={system} onChange={(e) => setSystem(e.target.value)} placeholder="Instruction système (optionnel)" />
+          <textarea className={`${GROW} ${field} nowheel h-14 resize-none`} value={system} onChange={(e) => setSystem(e.target.value)} placeholder="System instruction (optional)" />
           <TextOut value={data.outputs.text} />
         </>
       ) : (
@@ -792,42 +787,70 @@ export function ModelNode(props: NodeProps<FlowNode>) {
             history={data.history}
             onPick={(i) => pickHistory(id, i)}
           />
-          {draftId && (
-            <div className="flex items-center gap-2">
-              <span className={`rounded px-1.5 py-0.5 text-[10px] ${expired ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`}>
-                {expired ? "Brouillon expiré" : "Brouillon 480p"}
-                {expiry && ` · ${expired ? "le" : "expire le"} ${dayMonth(expiry)}`}
-              </span>
-              <button
-                className="nodrag ml-auto rounded-lg bg-fg px-2.5 py-1.5 text-[11px] font-medium text-bg disabled:opacity-50"
-                disabled={finalizing || running || expired}
-                onClick={finalize}
-                title={`Rend la même vidéo en 1080p. fal garde le brouillon ${DRAFT_DAYS} jours, et seulement pour le compte fal qui l'a généré.`}
-              >
-                {finalizing ? "Finalisation…" : `Finaliser en 1080p${finalCost ? ` (~${dollars(finalCost.cost)})` : ""}`}
-              </button>
-            </div>
-          )}
+          <DraftBar id={id} data={data} running={running} />
         </>
       )}
       {!promptWired && (
-        <textarea className={`${GROW} ${field} nowheel h-16 resize-none`} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Prompt (ou reliez un nœud Prompt)" />
+        <textarea className={`${GROW} ${field} nowheel h-16 resize-none`} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Prompt (or connect a Prompt node)" />
       )}
       {model?.negative && !negativeWired && (
         <textarea
           className={`${GROW} ${field} nowheel h-12 resize-none`}
           value={negative}
           onChange={(e) => setNegative(e.target.value)}
-          placeholder="Prompt négatif (optionnel) : ce que le modèle doit éviter"
+          placeholder="Negative prompt (optional): what the model should avoid"
         />
       )}
       <div className="flex items-center gap-1">
         {model && model.maxRefs > 1 && <RefButtons id={id} max={model.maxRefs} count={refNumbers(model, data.params).length} />}
         <div className="ml-auto">
-          <RunStop id={id} running={running} title="Exécute ce modèle (les nœuds en amont déjà générés sont réutilisés)" />
+          <RunStop id={id} running={running} title="Runs this model (upstream nodes already generated are reused)" />
         </div>
       </div>
     </NodeShell>
+  );
+}
+
+/** A Seedance draft's label, expiry and "Finalize in 1080p" button (fal or BytePlus). */
+function DraftBar({ id, data, running }: { id: string; data: FlowNode["data"]; running: boolean }) {
+  const draftId = data.outputs.draftId;
+  if (!draftId) return null;
+  const finalizing = !!data.finalizing;
+  const finalCost = finalizeEstimate(data);
+  const expiry = draftExpiry(data);
+  const expired = draftExpired(data);
+  const provider = draftProvider(data);
+
+  async function finalize() {
+    const price = finalCost
+      ? `Estimated cost: ~${dollars(finalCost.cost)}${finalCost.auto ? ` (\"auto\" duration: estimated at ${finalCost.seconds} s)` : ""}, billed by ${provider}.`
+      : "Cost can't be estimated.";
+    const until = expiry ? `\nThe draft expires on ${dayMonth(expiry)}.` : "";
+    const ok = await ask(`Render this draft in 1080p?\n\n${price}${until}`, {
+      title: "Finalize in 1080p",
+      kind: "warning",
+      okLabel: "Finalize",
+      cancelLabel: "Cancel",
+    });
+    // Errors are shown on the node.
+    if (ok) finalizeDraft(id).catch(() => {});
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`rounded px-1.5 py-0.5 text-[10px] ${expired ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`}>
+        {expired ? "Draft expired" : "480p draft"}
+        {expiry && ` · ${expired ? "on" : "expires"} ${dayMonth(expiry)}`}
+      </span>
+      <button
+        className="nodrag ml-auto rounded-lg bg-fg px-2.5 py-1.5 text-[11px] font-medium text-bg disabled:opacity-50"
+        disabled={finalizing || running || expired}
+        onClick={finalize}
+        title={`Renders the same video in 1080p. ${provider} keeps the draft ${DRAFT_DAYS} days, and only for the account that generated it.`}
+      >
+        {finalizing ? "Finalizing…" : `Finalize in 1080p${finalCost ? ` (~${dollars(finalCost.cost)})` : ""}`}
+      </button>
+    </div>
   );
 }
 
@@ -841,7 +864,7 @@ function RefButtons({ id, max, count }: { id: string; max: number; count: number
         className="nodrag flex items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
         disabled={count >= max}
         onClick={() => setParam(id, "refs", String(count + 1))}
-        title={count >= max ? `${max} images au plus pour ce modèle` : "Ajoute une entrée image ; l'ordre des images est celui des entrées"}
+        title={count >= max ? `${max} images at most for this model` : "Adds an image input; images keep the order of the inputs"}
       >
         <Plus size={13} /> Image
       </button>
@@ -849,7 +872,7 @@ function RefButtons({ id, max, count }: { id: string; max: number; count: number
         className="nodrag grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
         disabled={count <= 1 || lastWired}
         onClick={() => setParam(id, "refs", String(count - 1))}
-        title={lastWired ? "Débranchez d'abord la dernière image" : "Retire la dernière entrée image"}
+        title={lastWired ? "Disconnect the last image first" : "Removes the last image input"}
       >
         <Minus size={13} />
       </button>
@@ -866,7 +889,7 @@ export function PreviewNode(props: NodeProps<FlowNode>) {
       ) : value && valueKind(value) === "text" ? (
         <TextOut value={value} />
       ) : (
-        <Media value={value} empty={<span>Reliez un nœud puis exécutez</span>} />
+        <Media value={value} empty={<span>Connect a node, then run</span>} />
       )}
     </NodeShell>
   );
@@ -878,16 +901,16 @@ export function RouterNode(props: NodeProps<FlowNode>) {
   return (
     <NodeShell {...props} icon={Split} title="Router" cardWidth={190} runnable={false}>
       <div className="text-[11px] text-muted">
-        {kind ? `Transmet : ${kind === "text" ? "texte" : kind}` : "Une entrée, autant de sorties que nécessaire."}
+        {kind ? `Passes on: ${kind}` : "One input, as many outputs as needed."}
       </div>
     </NodeShell>
   );
 }
 
 const SEPARATORS: [string, string][] = [
-  ["newline", "Retour à la ligne"],
-  ["space", "Espace"],
-  ["comma", "Virgule"],
+  ["newline", "New line"],
+  ["space", "Space"],
+  ["comma", "Comma"],
 ];
 
 export function ConcatNode(props: NodeProps<FlowNode>) {
@@ -895,12 +918,12 @@ export function ConcatNode(props: NodeProps<FlowNode>) {
   const count = useFlowStore((s) => s.edges.filter((e) => e.target === props.id).length);
   return (
     <NodeShell {...props} icon={Merge} title="Prompt Concatenator" runnable={false}>
-      <div className="text-[11px] text-muted">{count} texte{count > 1 ? "s" : ""} relié{count > 1 ? "s" : ""}, dans l&apos;ordre des connexions.</div>
-      <Select label="Séparateur" value={separator} options={SEPARATORS} onChange={setSeparator} />
+      <div className="text-[11px] text-muted">{count} text{count > 1 ? "s" : ""} connected, in the order of the connections.</div>
+      <Select label="Separator" value={separator} options={SEPARATORS} onChange={setSeparator} />
       {props.data.outputs.text ? (
         <TextOut value={props.data.outputs.text} />
       ) : (
-        <div className="text-[11px] text-muted">Le texte assemblé s&apos;affiche ici en direct.</div>
+        <div className="text-[11px] text-muted">The joined text shows here live.</div>
       )}
     </NodeShell>
   );
@@ -940,12 +963,12 @@ export function CropNode(props: NodeProps<FlowNode>) {
       <button
         className={toolButton}
         onClick={() => setCover(id, data.cover === result ? null : result)}
-        title={data.cover === result ? "Couverture du projet : cliquer pour revenir à la dernière image générée" : "Définir comme couverture du projet (page d'accueil)"}
+        title={data.cover === result ? "Project cover: click to go back to the last generated image" : "Set as the project cover (home page)"}
       >
         <Star size={14} className={data.cover === result ? "fill-amber-300 text-amber-300" : undefined} />
       </button>
       <DownloadButton path={result} name="crop" className={toolButton} />
-      <button className={toolButton} onClick={() => setFull(true)} title="Plein écran">
+      <button className={toolButton} onClick={() => setFull(true)} title="Full screen">
         <Maximize2 size={14} />
       </button>
     </>
@@ -962,7 +985,7 @@ export function CropNode(props: NodeProps<FlowNode>) {
         />
       ) : (
         <div className="checker grid min-h-[160px] place-items-center rounded-xl border border-line text-[11px] text-muted">
-          Reliez une image (exécutée)
+          Connect an image (already run)
         </div>
       )}
       {full && result && <Lightbox value={result} name="crop" onClose={() => setFull(false)} />}
@@ -973,7 +996,7 @@ export function CropNode(props: NodeProps<FlowNode>) {
 function LlmSelect({ id, data }: { id: string; data: FlowNode["data"] }) {
   const [model, setModel] = useParam(id, data, "model");
   useModels((s) => s.models.length);
-  return <Select label="Modèle" value={model} options={llmOptions().map((o) => [o, o])} onChange={setModel} />;
+  return <Select label="Model" value={model} options={llmOptions().map((o) => [o, o])} onChange={setModel} />;
 }
 
 export function EnhancerNode(props: NodeProps<FlowNode>) {
@@ -982,7 +1005,7 @@ export function EnhancerNode(props: NodeProps<FlowNode>) {
   return (
     <NodeShell {...props} icon={WandSparkles} title="Prompt Enhancer">
       {!wired && (
-        <textarea className={`${GROW} ${field} nowheel h-16 resize-none`} value={text} onChange={(e) => setText(e.target.value)} placeholder="Idée de départ (ou reliez un Prompt)" />
+        <textarea className={`${GROW} ${field} nowheel h-16 resize-none`} value={text} onChange={(e) => setText(e.target.value)} placeholder="Starting idea (or connect a Prompt)" />
       )}
       <LlmSelect id={props.id} data={props.data} />
       <TextOut value={props.data.outputs.text} />
@@ -991,8 +1014,8 @@ export function EnhancerNode(props: NodeProps<FlowNode>) {
 }
 
 const DETAILS: [string, string][] = [
-  ["long", "Détaillée"],
-  ["short", "Courte"],
+  ["long", "Detailed"],
+  ["short", "Short"],
 ];
 
 export function DescriberNode(props: NodeProps<FlowNode>) {
@@ -1022,11 +1045,11 @@ export function VideoDescriberNode(props: NodeProps<FlowNode>) {
         className={`${GROW} ${field} nowheel h-14 resize-none`}
         value={question}
         onChange={(e) => setQuestion(e.target.value)}
-        placeholder="Question précise (optionnel) — sinon description complète"
+        placeholder="Specific question (optional) — otherwise a full description"
       />
       <label className="nodrag flex items-center gap-2 text-[11px] text-muted">
         <input type="checkbox" className="accent-accent" checked={detailed === "true"} onChange={(e) => setDetailed(String(e.target.checked))} />
-        Analyse détaillée
+        Detailed analysis
       </label>
       <TextOut value={props.data.outputs.text} />
     </NodeShell>
@@ -1067,9 +1090,9 @@ function useInputValues(id: string, handle: string) {
 /** Longest segment, in seconds; read by `recast::max_piece`. Shorter keeps the
  *  character closer to the photo, since each segment starts again from it. */
 const RECAST_SEGMENTS: [string, string][] = [
-  ["auto", "Les plus longs possible"],
-  ["10", "10 s, plus fidèle"],
-  ["6", "6 s, le plus fidèle"],
+  ["auto", "As long as possible"],
+  ["10", "10 s, more faithful"],
+  ["6", "6 s, most faithful"],
 ];
 
 export function RecastNode(props: NodeProps<FlowNode>) {
@@ -1129,19 +1152,19 @@ export function RecastNode(props: NodeProps<FlowNode>) {
                 <video src={mediaSrc(p.video)} className="nodrag h-full w-full object-cover" controls muted loop playsInline />
               ) : p.error ? (
                 <span className="px-1 text-center text-[10px] leading-tight text-red-300" title={p.error}>
-                  {/flagged by a content checker/i.test(p.error) ? "Refusé par le filtre de contenu du modèle" : p.error}
+                  {/flagged by a content checker/i.test(p.error) ? "Refused by the model's content filter" : p.error}
                 </span>
               ) : running ? (
                 <Loader2 size={14} className="animate-spin text-muted" />
               ) : (
-                <span className="text-[9px] text-muted">Arrêté</span>
+                <span className="text-[9px] text-muted">Stopped</span>
               )}
               {redoing === i && <div className="absolute inset-0 animate-pulse bg-accent/10" />}
             </div>
             <div className="flex items-center text-[10px] text-muted">
               <span className="mr-auto">Seg. {i + 1}</span>
               {p.video && <DownloadButton path={p.video} name={`recast-segment-${i + 1}`} className={iconButton} />}
-              <button className={iconButton} disabled={running} onClick={() => redo(i)} title="Refaire ce segment seulement">
+              <button className={iconButton} disabled={running} onClick={() => redo(i)} title="Redo this segment only">
                 <RotateCcw size={12} />
               </button>
             </div>
@@ -1151,16 +1174,16 @@ export function RecastNode(props: NodeProps<FlowNode>) {
       <div className="flex items-center gap-2 text-[10px] text-muted">
         <span className="mr-auto">
           {ready < pieces.length
-            ? `${ready}/${pieces.length} segments prêts${running ? "" : " : refaites ceux en erreur pour assembler"}`
+            ? `${ready}/${pieces.length} segments ready${running ? "" : ": redo the failed ones to merge"}`
             : data.outputs.video
-              ? "Assemblés : vidéo complète dans Preview"
+              ? "Merged: full video in Preview"
               : running
-                ? "Assemblage…"
-                : `${pieces.length} segments prêts`}
+                ? "Merging…"
+                : `${pieces.length} segments ready`}
         </span>
         {ready === pieces.length && !data.outputs.video && !running && (
-          <button className="nodrag rounded-lg bg-fg px-2.5 py-1.5 text-[11px] font-medium text-bg" onClick={() => redo("join")} title="Réunit les segments dans l'ordre, dans le nœud Preview">
-            Assembler
+          <button className="nodrag rounded-lg bg-fg px-2.5 py-1.5 text-[11px] font-medium text-bg" onClick={() => redo("join")} title="Joins the segments in order, in the Preview node">
+            Merge
           </button>
         )}
       </div>
@@ -1174,7 +1197,7 @@ export function RecastNode(props: NodeProps<FlowNode>) {
           {source ? (
             <video src={mediaSrc(source)} className="nodrag h-full w-full object-cover" muted loop playsInline autoPlay />
           ) : (
-            <span className="px-2 text-center text-[11px] text-muted">Reliez une vidéo source</span>
+            <span className="px-2 text-center text-[11px] text-muted">Connect a source video</span>
           )}
         </div>
         <div className="checker grid aspect-[4/5] place-items-center overflow-hidden rounded-xl border border-line">
@@ -1186,7 +1209,7 @@ export function RecastNode(props: NodeProps<FlowNode>) {
               ))}
             </div>
           ) : (
-            <span className="px-2 text-center text-[11px] text-muted">Reliez l&apos;image de votre personnage</span>
+            <span className="px-2 text-center text-[11px] text-muted">Connect your character&apos;s image</span>
           )}
         </div>
         {data.status === "running" && pieces.length === 0 && <div className="absolute inset-0 animate-pulse rounded-xl bg-accent/10" />}
@@ -1196,16 +1219,16 @@ export function RecastNode(props: NodeProps<FlowNode>) {
 
       {data.outputs.video && (pieces.length === 0 || history.length > 1) && (
         <div className="flex items-center gap-1 text-[10px] text-muted">
-          <span className="mr-auto">{pieces.length ? "Versions" : "Résultat affiché dans Preview"}</span>
+          <span className="mr-auto">{pieces.length ? "Versions" : "Result shown in Preview"}</span>
           {history.length > 1 && (
             <>
-              <button className={iconButton} disabled={version <= 0} onClick={() => pickHistory(id, version - 1)} title="Version précédente">
+              <button className={iconButton} disabled={version <= 0} onClick={() => pickHistory(id, version - 1)} title="Previous version">
                 ‹
               </button>
               <span>
                 {version + 1}/{history.length}
               </span>
-              <button className={iconButton} disabled={version >= history.length - 1} onClick={() => pickHistory(id, version + 1)} title="Version suivante">
+              <button className={iconButton} disabled={version >= history.length - 1} onClick={() => pickHistory(id, version + 1)} title="Next version">
                 ›
               </button>
             </>
@@ -1229,7 +1252,7 @@ export function RecastNode(props: NodeProps<FlowNode>) {
       <div className="grid grid-cols-2 gap-2">
         <div className="col-span-2">
           <Select
-            label="Modèle"
+            label="Model"
             value={data.params.modelId}
             options={(mode?.models ?? []).map((c): [string, string] => [c.id, findModel(c.id)?.label ?? c.id])}
             onChange={(v) => choose(mode!.id, v)}
@@ -1273,7 +1296,7 @@ export function RecastNode(props: NodeProps<FlowNode>) {
           className={`${GROW} ${field} nowheel h-14 resize-none`}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Consignes (optionnel) : qui devient qui, ce qu'il faut garder ou changer"
+          placeholder="Instructions (optional): who becomes whom, what to keep or change"
         />
       )}
       <div className="flex items-center justify-between gap-2">
@@ -1283,22 +1306,22 @@ export function RecastNode(props: NodeProps<FlowNode>) {
             onClick={() => setPrompt(mode.prompt)}
             title={mode.prompt}
           >
-            Consigne générique
+            Generic instructions
           </button>
         ) : (
           <span />
         )}
-        <RunStop id={id} running={running} title="Le prix par exécution est affiché dans le panneau de droite" />
+        <RunStop id={id} running={running} title="The price per run is shown in the right panel" />
       </div>
     </NodeShell>
   );
 }
 
 const GRID_PRESETS: [string, string, number][] = [
-  ["2x2", "4 vues — 2×2", 2],
-  ["3x3", "9 vues — 3×3", 3],
-  ["4x4", "16 vues — 4×4", 4],
-  ["5x5", "25 vues — 5×5", 5],
+  ["2x2", "4 views — 2×2", 2],
+  ["3x3", "9 views — 3×3", 3],
+  ["4x4", "16 views — 4×4", 4],
+  ["5x5", "25 views — 5×5", 5],
 ];
 
 export function GridCropNode(props: NodeProps<FlowNode>) {
@@ -1327,13 +1350,13 @@ export function GridCropNode(props: NodeProps<FlowNode>) {
   return (
     <NodeShell {...props} icon={Grid3x3} title="Grid Crop">
       <div className="rounded-lg border border-amber-400/25 bg-amber-400/5 px-2.5 py-2 text-[11px] leading-snug text-amber-100/90">
-        Découpe une image <b>déjà en grille</b> (planche de plusieurs vues). Pour générer des angles de caméra différents à partir
-        d&apos;une seule image :
+        Cuts an image <b>already laid out as a grid</b> (a sheet of several views). To generate different camera angles from
+        a single image:
         <button
           className="nodrag mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md bg-amber-300/90 py-1 text-[11px] font-medium text-black hover:bg-amber-200"
           onClick={() => gridCropToAngles(id)}
         >
-          <Camera size={12} /> Remplacer par Angles caméra
+          <Camera size={12} /> Replace with Camera angles
         </button>
       </div>
       <div className="checker relative overflow-hidden rounded-xl border border-line">
@@ -1358,13 +1381,13 @@ export function GridCropNode(props: NodeProps<FlowNode>) {
             </div>
           </div>
         ) : (
-          <div className="grid min-h-[140px] place-items-center text-[11px] text-muted">Reliez une planche d&apos;images</div>
+          <div className="grid min-h-[140px] place-items-center text-[11px] text-muted">Connect a sheet of images</div>
         )}
       </div>
       <Select
-        label="Grille"
+        label="Grid"
         value={preset}
-        options={[...GRID_PRESETS.map(([v, l]): [string, string] => [v, l]), ["custom", "Personnalisée"]]}
+        options={[...GRID_PRESETS.map(([v, l]): [string, string] => [v, l]), ["custom", "Custom"]]}
         onChange={(v) => {
           if (v === "custom") return setCustom(true);
           setCustom(false);
@@ -1375,13 +1398,13 @@ export function GridCropNode(props: NodeProps<FlowNode>) {
       {custom && (
         <div className="grid grid-cols-2 gap-2">
           <Select
-            label="Lignes"
+            label="Rows"
             value={String(rows)}
             options={Array.from({ length: MAX_GRID }, (_, i): [string, string] => [String(i + 1), String(i + 1)])}
             onChange={(v) => setGrid(Number(v), cols)}
           />
           <Select
-            label="Colonnes"
+            label="Columns"
             value={String(cols)}
             options={Array.from({ length: MAX_GRID }, (_, i): [string, string] => [String(i + 1), String(i + 1)])}
             onChange={(v) => setGrid(rows, Number(v))}
@@ -1389,7 +1412,7 @@ export function GridCropNode(props: NodeProps<FlowNode>) {
         </div>
       )}
       <label className="block text-[10px] text-muted">
-        Rogner les bords de chaque vue : {inset}%
+        Trim the edges of each view: {inset}%
         <input
           type="range"
           min={0}
@@ -1404,7 +1427,7 @@ export function GridCropNode(props: NodeProps<FlowNode>) {
         />
       </label>
       <div className="text-[10px] text-muted">
-        {rows * cols} vues sur une seule sortie « Vues », à relier à Aperçu des angles ou Export des angles. ▶ pour découper.
+        {rows * cols} views on a single “Views” output, to connect to Angle picker or Export angles. ▶ to cut.
       </div>
     </NodeShell>
   );
@@ -1441,7 +1464,7 @@ export function AnglesNode(props: NodeProps<FlowNode>) {
   }
 
   return (
-    <NodeShell {...props} icon={Camera} title="Angles caméra" subtitle={model?.label} modelId={data.params.modelId} cardWidth={380}>
+    <NodeShell {...props} icon={Camera} title="Camera angles" subtitle={model?.label} modelId={data.params.modelId} cardWidth={380}>
       {done ? (
         <Gallery views={views} cols={cols} />
       ) : (
@@ -1450,7 +1473,7 @@ export function AnglesNode(props: NodeProps<FlowNode>) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaSrc(reference)} alt="" className="block max-h-44 w-full object-contain" draggable={false} />
           ) : (
-            <span className="text-[11px] text-muted">Reliez une image de référence</span>
+            <span className="text-[11px] text-muted">Connect a reference image</span>
           )}
           {data.status === "running" && <div className="absolute inset-0 animate-pulse bg-accent/10" />}
         </div>
@@ -1458,15 +1481,15 @@ export function AnglesNode(props: NodeProps<FlowNode>) {
 
       <div className="grid grid-cols-2 gap-2">
         <Select
-          label="Modèle"
+          label="Model"
           value={data.params.modelId}
           options={models.filter((m) => m.category === "image" && m.editEndpoint).map((m): [string, string] => [m.id, m.label])}
           onChange={(v) => update("modelId", v)}
         />
         <Select
-          label="Disposition"
+          label="Layout"
           value={`${cols}x${rows}`}
-          options={ANGLE_LAYOUTS.map(([c, r]): [string, string] => [`${c}x${r}`, `${c}×${r} — ${c * r} plans`])}
+          options={ANGLE_LAYOUTS.map(([c, r]): [string, string] => [`${c}x${r}`, `${c}×${r} — ${c * r} shots`])}
           onChange={(v) => {
             update("layout", v);
             // Resize the shot list to the new grid, keeping choices already made.
@@ -1474,18 +1497,18 @@ export function AnglesNode(props: NodeProps<FlowNode>) {
           }}
         />
         <Select
-          label="Génération"
+          label="Generation"
           value={separate ? "separate" : "sheet"}
           options={[
-            ["sheet", "Planche (1 appel)"],
-            ["separate", `Par plan (${cols * rows} appels)`],
+            ["sheet", "Sheet (1 call)"],
+            ["separate", `Per shot (${cols * rows} calls)`],
           ]}
           onChange={(v) => update("mode", v)}
         />
-        <Select label="Format des plans" value={data.params.panel || "16:9"} options={PANEL_FORMATS} onChange={(v) => update("panel", v)} />
+        <Select label="Shot ratio" value={data.params.panel || "16:9"} options={PANEL_FORMATS} onChange={(v) => update("panel", v)} />
         {resolutions && (
           <Select
-            label="Résolution"
+            label="Resolution"
             value={resolutions.includes(data.params.resolution) ? data.params.resolution : (model?.params.find((p) => p.key === "resolution")?.default ?? "")}
             options={resolutions.map((r): [string, string] => [r, r])}
             onChange={(v) => update("resolution", v)}
@@ -1494,13 +1517,13 @@ export function AnglesNode(props: NodeProps<FlowNode>) {
         {!separate && (
           <label className="nodrag flex items-center gap-2 self-end pb-2 text-[11px] text-muted">
             <input type="checkbox" className="accent-accent" checked={data.params.labels === "true"} onChange={(e) => update("labels", String(e.target.checked))} />
-            Noms dans l&apos;image
+            Names in the image
           </label>
         )}
       </div>
 
       <div>
-        <div className="mb-1 text-[10px] text-muted">Plans, dans l&apos;ordre de la planche</div>
+        <div className="mb-1 text-[10px] text-muted">Shots, in the order of the sheet</div>
         <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}>
           {shots.map((shotId, i) => (
             <label key={i} className="relative block">
@@ -1522,8 +1545,8 @@ export function AnglesNode(props: NodeProps<FlowNode>) {
       </div>
       <div className="text-[10px] text-muted">
         {separate
-          ? `${cols * rows} générations séparées, meilleure résolution par plan.`
-          : "Une seule image en grille, découpée en plans : moins cher et plus cohérent."}
+          ? `${cols * rows} separate generations, better resolution per shot.`
+          : "A single grid image, cut into shots: cheaper and more consistent."}
       </div>
     </NodeShell>
   );
@@ -1580,26 +1603,26 @@ export function AnglePickNode(props: NodeProps<FlowNode>) {
   const selected = Math.min(Number(data.params.selected) || 0, Math.max(views.length - 1, 0));
 
   return (
-    <NodeShell {...props} icon={Images} title="Aperçu des angles" runnable={false} cardWidth={340}>
+    <NodeShell {...props} icon={Images} title="Angle picker" runnable={false} cardWidth={340}>
       {views.length ? (
         <>
           <Gallery views={views} cols={galleryCols(views.length)} selected={selected} onSelect={(i) => setParam(id, "selected", String(i))} />
           <div className="flex items-center gap-2 text-[11px] text-muted">
             <span className="min-w-0 flex-1 truncate">
-              Sortie : <span className="text-fg">{views[selected].label}</span> — cliquez un plan pour le choisir.
+              Output: <span className="text-fg">{views[selected].label}</span> — click a shot to choose it.
             </span>
             <button
               className="nodrag flex shrink-0 items-center gap-1 rounded-md bg-fg px-2 py-1 text-[11px] font-medium text-bg hover:opacity-90"
               onClick={() => extractViews(id)}
-              title="Crée un nœud image par plan, chacun avec sa propre sortie"
+              title="Creates one image node per shot, each with its own output"
             >
-              <Images size={12} /> Tout extraire
+              <Images size={12} /> Extract all
             </button>
           </div>
         </>
       ) : (
         <div className="checker grid min-h-[120px] place-items-center rounded-xl border border-line text-[11px] text-muted">
-          Reliez la sortie « Plans » d&apos;Angles caméra
+          Connect the &quot;Shots&quot; output of Camera angles
         </div>
       )}
     </NodeShell>
@@ -1621,10 +1644,10 @@ export function AngleExportNode(props: NodeProps<FlowNode>) {
   }
 
   return (
-    <NodeShell {...props} icon={FolderDown} title="Export des angles" cardWidth={280}>
+    <NodeShell {...props} icon={FolderDown} title="Export angles" cardWidth={280}>
       <div className="text-[11px] text-muted">
-        {views.length ? `${views.length} plans reçus.` : "Reliez la sortie « Plans » d'Angles caméra."} Ils sont enregistrés à chaque
-        exécution, nommés <span className="font-mono text-fg">01-gros-plan.png</span>…
+        {views.length ? `${views.length} shots received.` : "Connect the \"Shots\" output of Camera angles."} They are saved on each
+        run, named <span className="font-mono text-fg">01-close-up.png</span>…
       </div>
       <button
         className="nodrag flex w-full items-center gap-2 rounded-lg border border-line bg-panel-2 px-2.5 py-2 text-left text-[11px] hover:border-accent"
@@ -1632,13 +1655,13 @@ export function AngleExportNode(props: NodeProps<FlowNode>) {
         title={folder || undefined}
       >
         <FolderOpen size={13} className="shrink-0 text-muted" />
-        <span className={`truncate ${folder ? "text-fg" : "text-muted"}`}>{folder || "Choisir le dossier d'export"}</span>
+        <span className={`truncate ${folder ? "text-fg" : "text-muted"}`}>{folder || "Choose the export folder"}</span>
       </button>
       {data.outputs.summary && (
         <div className="flex items-center gap-2 text-[11px] text-emerald-300">
           {data.outputs.summary}
           <button className="nodrag ml-auto text-accent hover:underline" onClick={() => revealItemInDir(folder)}>
-            Ouvrir
+            Open
           </button>
         </div>
       )}
@@ -1653,17 +1676,17 @@ export function AddAudioNode(props: NodeProps<FlowNode>) {
   const pickHistory = useFlow((s) => s.pickHistory);
   const running = useRunning(id);
   return (
-    <NodeShell {...props} icon={AudioLines} title="Ajouter le son">
+    <NodeShell {...props} icon={AudioLines} title="Add sound">
       <Media
         value={data.outputs.video}
         running={data.status === "running"}
-        empty={<span>Reliez une vidéo et un son</span>}
+        empty={<span>Connect a video and a sound</span>}
         name="video-son"
         history={data.history}
         onPick={(i) => pickHistory(id, i)}
       />
       <label className="nodrag flex items-center justify-between gap-2 text-[11px] text-muted">
-        Début du son (s)
+        Sound start (s)
         <input
           type="number"
           min={0}
@@ -1673,9 +1696,9 @@ export function AddAudioNode(props: NodeProps<FlowNode>) {
           onChange={(e) => setOffset(e.target.value)}
         />
       </label>
-      <div className="text-[10px] leading-snug text-muted">Remplace la piste son de la vidéo.</div>
+      <div className="text-[10px] leading-snug text-muted">Replaces the video&apos;s sound track.</div>
       <div className="flex justify-end">
-        <RunStop id={id} running={running} title="Pose le son sur la vidéo" />
+        <RunStop id={id} running={running} title="Puts the sound on the video" />
       </div>
     </NodeShell>
   );
@@ -1688,7 +1711,7 @@ export function CompositorNode(props: NodeProps<FlowNode>) {
   const running = useRunning(id);
   const [editing, setEditing] = useState(false);
   const numbers = compositorLayers(data.params);
-  const ports = [{ port: "bg", label: "Arrière-plan" }, ...numbers.map((i) => ({ port: `layer${i}`, label: `Calque ${i}` }))];
+  const ports = [{ port: "bg", label: "Background" }, ...numbers.map((i) => ({ port: `layer${i}`, label: `Layer ${i}` }))];
   // One string, so the selector's result compares equal between renders.
   const joined = useFlowStore((s) =>
     ports
@@ -1705,11 +1728,11 @@ export function CompositorNode(props: NodeProps<FlowNode>) {
   const lastWired = useConnected(id, `layer${last}`);
 
   return (
-    <NodeShell {...props} icon={Layers} title="Compositeur" handleStep={26}>
+    <NodeShell {...props} icon={Layers} title="Compositor" handleStep={26}>
       <Media
         value={data.outputs.media}
         running={data.status === "running"}
-        empty={<span>Reliez des images, vidéos ou sons, puis éditez</span>}
+        empty={<span>Connect images, videos or sounds, then edit</span>}
         name="composition"
       />
       <div className="flex items-center gap-1">
@@ -1717,15 +1740,15 @@ export function CompositorNode(props: NodeProps<FlowNode>) {
           className="nodrag flex items-center gap-1 rounded-lg px-2 py-1.5 text-[12px] text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
           disabled={last >= MAX_LAYERS}
           onClick={() => setParam(id, "layers", String(last + 1))}
-          title="Ajoute une entrée de calque"
+          title="Adds a layer input"
         >
-          <Plus size={13} /> Calque
+          <Plus size={13} /> Layer
         </button>
         <button
           className="nodrag grid h-7 w-7 place-items-center rounded-lg text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-30"
           disabled={last === 0 || lastWired}
           onClick={() => setParam(id, "layers", String(last - 1))}
-          title={lastWired ? "Débranchez d'abord le dernier calque" : "Retire le dernier calque"}
+          title={lastWired ? "Disconnect the last layer first" : "Removes the last layer"}
         >
           <Minus size={13} />
         </button>
@@ -1734,9 +1757,9 @@ export function CompositorNode(props: NodeProps<FlowNode>) {
             className="nodrag flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px] hover:border-accent"
             onClick={() => setEditing(true)}
           >
-            <Pencil size={12} /> Éditer
+            <Pencil size={12} /> Edit
           </button>
-          <RunStop id={id} running={running} title="Exporte la composition en vidéo ou en image, sur cet ordinateur (gratuit)" />
+          <RunStop id={id} running={running} title="Exports the composition as a video or an image, on this computer (free)" />
         </div>
       </div>
       {editing && <CompositorEditor id={id} params={data.params} layers={layers} onClose={() => setEditing(false)} />}
@@ -1744,7 +1767,262 @@ export function CompositorNode(props: NodeProps<FlowNode>) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// BytePlus ModelArk (optional, the user's own account and keys)
+
+/** The BytePlus key a node needs, or null; loads the key status once. */
+function useBytePlusGate(kind: FlowNode["data"]["kind"]) {
+  const keys = useBytePlusKeys((s) => s.keys);
+  const refresh = useBytePlusKeys((s) => s.refresh);
+  useEffect(() => {
+    if (!keys) refresh();
+  }, [keys, refresh]);
+  return missingKey(kind, keys);
+}
+
+/** Replaces the run button while a BytePlus key is missing. */
+function KeyNotice({ text }: { text: string }) {
+  return (
+    <div className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-200">
+      <KeyRound size={12} className="mt-0.5 shrink-0" />
+      <span>{text} (BytePlus ModelArk).</span>
+    </div>
+  );
+}
+
+function Toggle({ label, value, onChange, title }: { label: string; value: boolean; onChange: (v: boolean) => void; title?: string }) {
+  return (
+    <label className="nodrag flex items-center gap-1.5 text-[11px] text-muted" title={title}>
+      <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
+      {label}
+    </label>
+  );
+}
+
+const PORTRAIT_STATUS: Record<string, [string, string]> = {
+  Processing: ["In review", "bg-amber-500/15 text-amber-300"],
+  Active: ["Validated", "bg-emerald-500/15 text-emerald-300"],
+  Failed: ["Refused", "bg-red-500/15 text-red-300"],
+};
+
+/** Sends an AI character to the user's BytePlus portrait library and follows its review. */
+export function BpPortraitNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const [name, setName] = useParam(id, data, "name");
+  const [group, setGroup] = useParam(id, data, "group");
+  const image = useInputValue(id, "image");
+  const running = useRunning(id);
+  const gate = useBytePlusGate("bpPortrait");
+  const [label, tone] = PORTRAIT_STATUS[data.outputs.assetStatus ?? ""] ?? ["Not sent yet", "bg-panel-2 text-muted"];
+  // Another image wired since: running again sends it as a new portrait.
+  const changed = !!data.outputs.source && !!image && image !== data.outputs.source;
+
+  return (
+    <NodeShell {...props} icon={ScanFace} title="AI Portrait" subtitle="BytePlus ModelArk" runnable={!gate}>
+      <Media value={image ?? data.outputs.source} running={data.status === "running"} empty={<span>Connect the character&apos;s image</span>} name={name || "portrait"} />
+      <div className="flex items-center gap-2">
+        <span className={`rounded px-1.5 py-0.5 text-[10px] ${tone}`}>{label}</span>
+        {changed && <span className="text-[10px] text-muted">new image: run again to send it</span>}
+      </div>
+      {data.outputs.portrait && (
+        <code className="nodrag select-text truncate rounded bg-panel-2 px-2 py-1 font-mono text-[10px] text-muted" title={data.outputs.portrait}>
+          {data.outputs.portrait}
+        </code>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <input className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Nora)" />
+        <input className={field} value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Group" title="BytePlus portrait group, created if missing" />
+      </div>
+      <div className="flex items-start gap-1.5 text-[10px] leading-snug text-muted">
+        <TriangleAlert size={11} className="mt-px shrink-0 text-amber-300" />
+        <span>AI character only — must not resemble any real person — no brand logo on the image.</span>
+      </div>
+      {gate ? (
+        <KeyNotice text={gate} />
+      ) : (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] leading-snug text-muted">The image goes through fal storage (fal key required).</span>
+          <div className="ml-auto">
+            <RunStop id={id} running={running} title="Sends the portrait to BytePlus and follows its review (an image already validated is not sent again)" />
+          </div>
+        </div>
+      )}
+    </NodeShell>
+  );
+}
+
+/** Which Seedance 2.5 task the wired inputs make; the two kinds can't be mixed. */
+function useSeedanceMode(id: string) {
+  return useFlowStore((s) => {
+    const wired = (h: string) => s.edges.filter((e) => e.target === id && e.targetHandle === h).length;
+    const refs = wired("portraits") + wired("refs");
+    const frames = wired("start") + wired("end");
+    if (refs && frames) return { mode: "conflict" as const, refs };
+    if (frames) return { mode: wired("end") && !wired("start") ? ("noStart" as const) : ("frames" as const), refs };
+    return { mode: refs ? ("refs" as const) : ("text" as const), refs };
+  }, (a, b) => a.mode === b.mode && a.refs === b.refs);
+}
+
+const SEEDANCE_MODES = {
+  text: "Mode: text → video",
+  refs: "Mode: references. In the prompt, call them \"Image 1\", \"Image 2\"…: portraits first, then images.",
+  frames: "Mode: start/end image (adaptive ratio enforced). A face only gets through if it comes from a BytePlus Seedream.",
+};
+
+/** Seedance 2.5 on BytePlus: faces through validated portraits or trusted Seedream images. */
+export function BpSeedanceNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const [prompt, setPrompt] = useParam(id, data, "prompt");
+  const [duration, setDuration] = useParam(id, data, "duration");
+  const [ratio, setRatio] = useParam(id, data, "ratio");
+  const [audio, setAudio] = useParam(id, data, "audio");
+  const [draft, setDraft] = useParam(id, data, "draft");
+  const [resolution, setResolution] = useParam(id, data, "resolution");
+  const promptWired = useConnected(id, "prompt");
+  const running = useRunning(id);
+  const pickHistory = useFlow((s) => s.pickHistory);
+  const gate = useBytePlusGate("bpSeedance");
+  const { mode, refs } = useSeedanceMode(id);
+  const isDraft = draft !== "false";
+  const est = bpSeedanceEstimate(data.params);
+  const blocked = mode === "conflict" || mode === "noStart" || refs > SEEDANCE_MAX_REFS;
+
+  return (
+    <NodeShell {...props} icon={Clapperboard} title="Seedance 2.5" subtitle="BytePlus ModelArk" modelId="seedance-2.5" runnable={!gate}>
+      <Media
+        value={data.outputs.video}
+        running={data.status === "running" || !!data.finalizing}
+        empty={<Clapperboard size={20} />}
+        name="seedance-byteplus"
+        history={data.history}
+        onPick={(i) => pickHistory(id, i)}
+      />
+      <DraftBar id={id} data={data} running={running} />
+      {!promptWired && (
+        <textarea className={`${GROW} ${field} nowheel h-16 resize-none`} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder='Prompt (e.g. "The woman in Image 1 walks…")' />
+      )}
+      {mode === "conflict" ? (
+        <div className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-red-300">
+          Seedance 2.5 can&apos;t mix a start/end image with references. Disconnect one of them: to keep the character, keep the portrait and describe the first shot in the prompt.
+        </div>
+      ) : mode === "noStart" ? (
+        <div className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">An end image also needs a start image.</div>
+      ) : refs > SEEDANCE_MAX_REFS ? (
+        <div className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">{SEEDANCE_MAX_REFS} references at most (portraits and images).</div>
+      ) : (
+        <div className="text-[10px] leading-snug text-muted">{SEEDANCE_MODES[mode]}</div>
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <Select label="Duration" value={duration || "5"} options={SEEDANCE_DURATIONS} onChange={setDuration} />
+        <Select label="Aspect ratio" value={ratio || "adaptive"} options={SEEDANCE_RATIOS} onChange={setRatio} />
+        {!isDraft && (
+          <Select
+            label="Resolution"
+            value={resolution || "1080p"}
+            options={[
+              ["480p", "480p"],
+              ["720p", "720p"],
+              ["1080p", "1080p"],
+            ]}
+            onChange={setResolution}
+          />
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+        <Toggle label="480p draft" value={isDraft} onChange={(v) => setDraft(String(v))} title="A cheaper 480p draft, to finalize in 1080p if you like it (14 days)" />
+        <Toggle label="Sound" value={audio !== "false"} onChange={(v) => setAudio(String(v))} />
+      </div>
+      {gate ? (
+        <KeyNotice text={gate} />
+      ) : (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] leading-snug text-muted" title="BytePlus pricing: tokens = width × height × 24 × seconds / 1024">
+            ~{dollars(est.cost)} · {est.resolution}
+            {est.auto ? `, estimated at ${est.seconds} s` : ""}
+            {est.adaptive ? ", largest ratio" : ""} · billed by BytePlus
+          </span>
+          <div className="ml-auto">
+            {blocked ? (
+              <button className="nodrag rounded-lg border border-line px-3 py-1.5 text-[12px] text-muted opacity-50" disabled>
+                Run
+              </button>
+            ) : (
+              <RunStop id={id} running={running} title="Starts the generation on BytePlus (upstream nodes already generated are reused)" />
+            )}
+          </div>
+        </div>
+      )}
+    </NodeShell>
+  );
+}
+
+/** Seedream 5.0 on BytePlus: text-to-image outputs are trusted Seedance inputs for 30 days. */
+export function BpSeedreamNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const [prompt, setPrompt] = useParam(id, data, "prompt");
+  const [model, setModel] = useParam(id, data, "model");
+  const [size, setSize] = useParam(id, data, "size");
+  const promptWired = useConnected(id, "prompt");
+  const running = useRunning(id);
+  const pickHistory = useFlow((s) => s.pickHistory);
+  const gate = useBytePlusGate("bpSeedream");
+  const refs = useFlowStore((s) => s.edges.filter((e) => e.target === id && e.targetHandle === "refs").length);
+  const expiry = trustExpiry(data.outputs);
+  const trusted = !!expiry && expiry.getTime() > Date.now();
+
+  return (
+    <NodeShell {...props} icon={ImageIcon} title="Seedream" subtitle="BytePlus ModelArk" modelId="seedream-5-lite" runnable={!gate}>
+      <Media value={data.outputs.image} running={data.status === "running"} empty={<ImageIcon size={20} />} name="seedream-byteplus" history={data.history} onPick={(i) => pickHistory(id, i)} />
+      {data.outputs.image &&
+        (expiry ? (
+          <span className={`self-start rounded px-1.5 py-0.5 text-[10px] ${trusted ? "bg-emerald-500/15 text-emerald-300" : "bg-panel-2 text-muted"}`}>
+            {trusted ? `Trusted for Seedance · expires ${dayMonth(expiry)}` : `Trust expired on ${dayMonth(expiry)}`}
+          </span>
+        ) : (
+          <span className="self-start rounded bg-panel-2 px-1.5 py-0.5 text-[10px] text-muted">With references: trust not guaranteed</span>
+        ))}
+      {!promptWired && (
+        <textarea className={`${GROW} ${field} nowheel h-16 resize-none`} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Prompt (or connect a Prompt node)" />
+      )}
+      <div className="grid grid-cols-2 gap-2">
+        <Select
+          label="Model"
+          value={model || "pro"}
+          options={[
+            ["pro", "Seedream 5.0 pro"],
+            ["flash", "Seedream 5.0 flash"],
+          ]}
+          onChange={setModel}
+        />
+        <Select
+          label="Size"
+          value={size || "2K"}
+          options={[
+            ["2K", "2K"],
+            ["1K", "1K"],
+          ]}
+          onChange={setSize}
+        />
+      </div>
+      {refs > 0 && <div className="text-[10px] leading-snug text-muted">Only text-to-image outputs are accepted by Seedance with a face.</div>}
+      {gate ? (
+        <KeyNotice text={gate} />
+      ) : (
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted">~{dollars(bpSeedreamCost(data.params, refs))} · billed by BytePlus</span>
+          <div className="ml-auto">
+            <RunStop id={id} running={running} title="Generates the image on BytePlus" />
+          </div>
+        </div>
+      )}
+    </NodeShell>
+  );
+}
+
 export const nodeTypes = {
+  bpPortrait: BpPortraitNode,
+  bpSeedance: BpSeedanceNode,
+  bpSeedream: BpSeedreamNode,
   compositor: CompositorNode,
   prompt: PromptNode,
   list: ListNode,

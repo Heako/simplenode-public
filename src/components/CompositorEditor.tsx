@@ -411,11 +411,11 @@ export default function CompositorEditor({
               run(id);
               onClose();
             }}
-            title="Exporte la composition en vidéo ou en image, sur cet ordinateur (gratuit)"
+            title="Exports the composition as a video or an image, on this computer (free)"
           >
-            {running ? "Export…" : "Exporter"}
+            {running ? "Exporting…" : "Export"}
           </button>
-          <button className="grid h-7 w-7 place-items-center rounded-md text-muted hover:bg-panel-2 hover:text-fg" onClick={onClose} title="Fermer (Échap)">
+          <button className="grid h-7 w-7 place-items-center rounded-md text-muted hover:bg-panel-2 hover:text-fg" onClick={onClose} title="Close (Esc)">
             <X size={16} />
           </button>
         </div>
@@ -423,7 +423,7 @@ export default function CompositorEditor({
 
       <div className="flex min-h-0 flex-1">
         <aside className="w-56 shrink-0 overflow-y-auto border-r border-line bg-panel p-2">
-          <h3 className="px-2 pt-1 pb-2 text-[11px] font-medium tracking-wide text-muted uppercase">Calques</h3>
+          <h3 className="px-2 pt-1 pb-2 text-[11px] font-medium tracking-wide text-muted uppercase">Layers</h3>
           {stack.map((l) => {
             const i = info(l);
             const Icon = i ? KIND_ICONS[i.kind] : Rows3;
@@ -469,11 +469,11 @@ export default function CompositorEditor({
                     }}
                   />
                 ) : (
-                  <span className="min-w-0 flex-1 truncate" onDoubleClick={() => setRenaming(l.port)} title="Double-clic pour renommer, glisser pour réordonner">
+                  <span className="min-w-0 flex-1 truncate" onDoubleClick={() => setRenaming(l.port)} title="Double-click to rename, drag to reorder">
                     {nameOf(l)}
                   </span>
                 )}
-                {!l.value && <span className="text-[10px] text-muted">non relié</span>}
+                {!l.value && <span className="text-[10px] text-muted">not connected</span>}
                 {l.value && (
                   <button
                     className="text-muted opacity-0 group-hover:opacity-100 hover:text-fg data-[on]:opacity-100"
@@ -482,7 +482,7 @@ export default function CompositorEditor({
                       e.stopPropagation();
                       patch(l.port, { hidden: !hidden });
                     }}
-                    title={hidden ? "Afficher" : "Masquer"}
+                    title={hidden ? "Show" : "Hide"}
                   >
                     {hidden ? <EyeOff size={13} /> : <Eye size={13} />}
                   </button>
@@ -491,7 +491,7 @@ export default function CompositorEditor({
             );
           })}
           <p className="px-2 pt-3 text-[10px] leading-snug text-muted">
-            Le calque du haut passe devant : glissez-les pour les réordonner, double-cliquez pour renommer. Ajoutez des entrées avec « + Calque » sur le nœud, puis reliez-y des images, vidéos ou sons.
+            The top layer is in front: drag them to reorder, double-click to rename. Add inputs with “+ Layer” on the node, then connect images, videos or sounds to them.
           </p>
         </aside>
 
@@ -561,7 +561,7 @@ export default function CompositorEditor({
                   if (!playing && time >= total) setTime(0);
                   setPlaying(!playing);
                 }}
-                title={playing ? "Pause" : "Lecture"}
+                title={playing ? "Pause" : "Play"}
               >
                 {playing ? <Pause size={14} /> : <Play size={14} />}
               </button>
@@ -609,9 +609,9 @@ export default function CompositorEditor({
 
         <aside className="w-64 shrink-0 space-y-4 overflow-y-auto border-l border-line bg-panel p-4 text-xs">
           <section className="space-y-2">
-            <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">Canevas</h3>
+            <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">Canvas</h3>
             <div className="grid grid-cols-2 gap-2">
-              <NumberField label="L" value={Number(params.width) || undefined} placeholder={sizeHint} onChange={(v) => setParam(id, "width", v ? String(Math.round(v)) : "")} />
+              <NumberField label="W" value={Number(params.width) || undefined} placeholder={sizeHint} onChange={(v) => setParam(id, "width", v ? String(Math.round(v)) : "")} />
               <NumberField
                 label="H"
                 value={Number(params.height) || undefined}
@@ -619,16 +619,16 @@ export default function CompositorEditor({
                 onChange={(v) => setParam(id, "height", v ? String(Math.round(v)) : "")}
               />
             </div>
-            <p className="text-[10px] text-muted">Vide : la taille de l&apos;arrière-plan.</p>
+            <p className="text-[10px] text-muted">Empty: the size of the background.</p>
             <label className="flex items-center gap-2">
               <input type="checkbox" checked={timeline} onChange={(e) => setParam(id, "timeline", String(e.target.checked))} />
-              Mode timeline
+              Timeline mode
             </label>
             <p className="text-[10px] leading-snug text-muted">
-              Chaque calque a son début et sa durée. Sans ce mode, tout commence en même temps et la vidéo dure autant que le média le plus long.
+              Each layer has its own start and duration. Without this mode, everything starts together and the video lasts as long as the longest media.
             </p>
-            <button className="w-full rounded-md border border-line py-1.5 hover:border-accent" onClick={chain} title="Place les images et vidéos l'une après l'autre, plein cadre">
-              Enchaîner bout à bout
+            <button className="w-full rounded-md border border-line py-1.5 hover:border-accent" onClick={chain} title="Places the images and videos one after another, full frame">
+              Chain end to end
             </button>
           </section>
 
@@ -636,9 +636,9 @@ export default function CompositorEditor({
             <section className="space-y-2 border-t border-line pt-4">
               <h3 className="truncate text-[11px] font-medium tracking-wide text-muted uppercase">{nameOf(current)}</h3>
               {!current.value ? (
-                <p className="text-[11px] text-muted">Reliez une image, une vidéo ou un son à cette entrée, et exécutez le nœud relié.</p>
+                <p className="text-[11px] text-muted">Connect an image, video or sound to this input, and run the connected node.</p>
               ) : !currentInfo ? (
-                <p className="text-[11px] text-muted">Lecture du média…</p>
+                <p className="text-[11px] text-muted">Reading media…</p>
               ) : (
                 <>
                   {currentInfo.kind !== "audio" && currentBox && (
@@ -647,7 +647,7 @@ export default function CompositorEditor({
                         <NumberField label="X" value={currentBox.x} onChange={(v) => patch(current.port, { ...currentBox, x: v ?? 0 })} />
                         <NumberField label="Y" value={currentBox.y} onChange={(v) => patch(current.port, { ...currentBox, y: v ?? 0 })} />
                         <NumberField
-                          label="L"
+                          label="W"
                           value={currentBox.w}
                           onChange={(v) => v && patch(current.port, { ...currentBox, w: v, h: (v * currentBox.h) / currentBox.w })}
                         />
@@ -659,15 +659,15 @@ export default function CompositorEditor({
                       </div>
                       <div className="flex gap-2">
                         <button className="flex-1 rounded-md border border-line py-1.5 hover:border-accent" onClick={() => patch(current.port, fit(currentInfo, cw, ch, false))}>
-                          Ajuster
+                          Fit
                         </button>
                         <button className="flex-1 rounded-md border border-line py-1.5 hover:border-accent" onClick={() => patch(current.port, fit(currentInfo, cw, ch, true))}>
-                          Remplir
+                          Fill
                         </button>
                       </div>
                       <label className="block space-y-1">
                         <span className="flex justify-between text-muted">
-                          Opacité <span className="tabular-nums">{Math.round((place.opacity ?? 1) * 100)} %</span>
+                          Opacity <span className="tabular-nums">{Math.round((place.opacity ?? 1) * 100)} %</span>
                         </span>
                         <input
                           type="range"
@@ -698,20 +698,20 @@ export default function CompositorEditor({
                     </label>
                   )}
                   {currentInfo.kind !== "image" && (
-                    <label className="flex items-center gap-2" title="Le média se répète, chaque son se fondant dans le suivant">
+                    <label className="flex items-center gap-2" title="The media repeats, each sound fading into the next">
                       <input type="checkbox" checked={!!place.loop} onChange={(e) => patch(current.port, { loop: e.target.checked || undefined })} />
-                      Boucler {timeline && !place.duration ? "jusqu'à la fin" : ""}
+                      Loop {timeline && !place.duration ? "until the end" : ""}
                     </label>
                   )}
                   {!place.loop && currentInfo.duration != null && (wanted(current) ?? 0) > currentInfo.duration + 0.05 && (
                     <p className="rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-200">
-                      Ce média ne dure que {round(currentInfo.duration)} s : il s&apos;arrête là. Cochez « Boucler » pour le répéter jusqu&apos;à {round(wanted(current) ?? 0)} s.
+                      This media only lasts {round(currentInfo.duration)} s: it stops there. Check “Loop” to repeat it until {round(wanted(current) ?? 0)} s.
                     </p>
                   )}
                   {timeline && (
                     <div className="grid grid-cols-2 gap-2">
                       <label className="space-y-1">
-                        <span className="text-muted">Début (s)</span>
+                        <span className="text-muted">Start (s)</span>
                         <input
                           type="number"
                           min={0}
@@ -722,14 +722,14 @@ export default function CompositorEditor({
                         />
                       </label>
                       <label className="space-y-1">
-                        <span className="text-muted">Durée (s)</span>
+                        <span className="text-muted">Duration (s)</span>
                         <input
                           type="number"
                           min={0}
                           step={0.1}
                           className={input}
                           value={place.duration ? round(place.duration) : ""}
-                          placeholder={currentInfo.duration ? `${round(currentInfo.duration)}` : "toute"}
+                          placeholder={currentInfo.duration ? `${round(currentInfo.duration)}` : "full"}
                           max={!place.loop && currentInfo.duration != null ? round(currentInfo.duration) : undefined}
                           onChange={(e) => {
                             const d = Number(e.target.value) || undefined;
@@ -743,7 +743,7 @@ export default function CompositorEditor({
                   )}
                   <div className="grid grid-cols-2 gap-2">
                     <label className="space-y-1">
-                      <span className="text-muted">Fondu entrée (s)</span>
+                      <span className="text-muted">Fade in (s)</span>
                       <input
                         type="number"
                         min={0}
@@ -755,7 +755,7 @@ export default function CompositorEditor({
                       />
                     </label>
                     <label className="space-y-1">
-                      <span className="text-muted">Fondu sortie (s)</span>
+                      <span className="text-muted">Fade out (s)</span>
                       <input
                         type="number"
                         min={0}
@@ -768,11 +768,11 @@ export default function CompositorEditor({
                     </label>
                   </div>
                   <p className="text-[10px] leading-snug text-muted">
-                    {currentInfo.kind === "audio" ? "Le son" : currentInfo.kind === "video" ? "L'image et le son" : "L'image"} monte et descend en douceur.
-                    {currentInfo.kind !== "image" && " Chaque son a de toute façon un fondu imperceptible de 20 ms, qui évite le clic de fin."}
+                    {currentInfo.kind === "audio" ? "The sound" : currentInfo.kind === "video" ? "The picture and sound" : "The picture"} fades in and out smoothly.
+                    {currentInfo.kind !== "image" && " Every sound gets an unnoticeable 20 ms fade anyway, which avoids the click at the end."}
                   </p>
                   <button className="text-[11px] text-muted hover:text-fg" onClick={() => save({ ...comp, [current.port]: { hidden: place.hidden, name: place.name } })}>
-                    Réinitialiser ce calque
+                    Reset this layer
                   </button>
                 </>
               )}
@@ -872,7 +872,7 @@ function TimelineRow({
           )}
           <div
             className="absolute inset-y-0 right-0 w-1.5 cursor-ew-resize rounded-r bg-accent"
-            title={max != null ? `Raccourcir (${round(max)} s au plus, ou cochez « Boucler »)` : "Changer la durée"}
+            title={max != null ? `Shorten (${round(max)} s at most, or check "Loop")` : "Change the duration"}
             onPointerDown={(e) => drag(e, "end")}
           />
         </div>

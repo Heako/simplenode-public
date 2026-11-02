@@ -1,136 +1,139 @@
 # SimpleNode
 
-Application de bureau pour construire des workflows de génération IA sous forme de graphe de nœuds : on relie des prompts, des images et des vidéos à des modèles (Nano Banana, Seedream, Kling, Veo, Seedance…), puis on exécute le graphe. Tous les modèles passent par [fal.ai](https://fal.ai).
+A desktop app for building AI generation workflows as a node graph: connect prompts, images and videos to models (Nano Banana, Seedream, Kling, Veo, Seedance…), then run the graph. Every model runs through [fal.ai](https://fal.ai), and optionally BytePlus ModelArk.
 
-Construite avec **Tauri 2** (backend Rust) et **Next.js + React Flow** (interface).
+Built with **Tauri 2** (Rust backend) and **Next.js + React Flow** (interface).
 
-## Télécharger et installer (sans compétences techniques)
+## Download and install (no technical skills needed)
 
-1. **Téléchargez** le fichier `SimpleNode_x.y.z_universal.dmg` de la dernière version, sur la page [Releases](https://github.com/Heako/simplenode-public/releases/latest). Il fonctionne sur tous les Mac récents (puce Apple M1 à M4, ou Intel), avec macOS 11 ou plus récent.
-2. **Ouvrez** le fichier téléchargé, puis faites glisser l'icône **SimpleNode** sur le dossier **Applications**.
-3. **Lancez SimpleNode** depuis le dossier Applications (ou le Launchpad).
+1. **Download** the `SimpleNode_x.y.z_universal.dmg` file of the latest version from the [Releases](https://github.com/Heako/simplenode-public/releases/latest) page. It works on all recent Macs (Apple M1 to M4 chips, or Intel), with macOS 11 or later.
+2. **Open** the downloaded file, then drag the **SimpleNode** icon onto the **Applications** folder.
+3. **Launch SimpleNode** from the Applications folder (or Launchpad).
 
-**Au premier lancement, macOS affiche un avertissement**, car l'app n'est pas encore signée par Apple. C'est normal. Pour l'autoriser une fois pour toutes :
+**On first launch, macOS shows a warning**, because the app isn't signed by Apple yet. This is expected. To allow it once and for all:
 
-- Cliquez sur **Terminé** (ne la mettez pas à la corbeille).
-- Ouvrez **Réglages Système → Confidentialité et sécurité**, descendez jusqu'au message « SimpleNode a été bloqué », puis cliquez sur **Ouvrir quand même** et confirmez avec votre mot de passe.
-- Relancez SimpleNode. L'avertissement n'apparaîtra plus.
+- Click **Done** (don't move it to the trash).
+- Open **System Settings → Privacy & Security**, scroll down to the message "SimpleNode was blocked", then click **Open Anyway** and confirm with your password.
+- Launch SimpleNode again. The warning won't come back.
 
-Si macOS indique que l'app « est endommagée », ouvrez l'app **Terminal**, collez cette ligne puis appuyez sur Entrée :
+If macOS says the app "is damaged", open the **Terminal** app, paste this line and press Return:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/SimpleNode.app
 ```
 
-**Pour le Compositeur**, installez aussi ffmpeg, une seule fois : installez [Homebrew](https://brew.sh), puis tapez `brew install ffmpeg` dans le Terminal. Le reste de l'app fonctionne sans.
+**For the Compositor**, also install ffmpeg, once: install [Homebrew](https://brew.sh), then type `brew install ffmpeg` in the Terminal. The rest of the app works without it.
 
-**Au premier lancement, SimpleNode vous guide** pour créer votre compte [fal.ai](https://fal.ai), le service qui génère les images et vidéos, puis pour y ajouter un peu de crédit et coller votre clé. Chaque génération est facturée par fal.ai à l'unité (de quelques centimes pour une image à environ un euro pour une vidéo). Votre clé reste sur votre ordinateur.
+**On first launch, SimpleNode guides you** through creating your [fal.ai](https://fal.ai) account, the service that generates the images and videos, adding some credit to it and pasting your key. fal.ai bills each generation per unit (from a few cents for an image to about a dollar for a video). Your key stays on your computer.
 
-## Fonctionnalités
+## Features
 
-- **Canvas à nœuds** : glisser-déposer depuis la bibliothèque, clic droit pour ajouter un nœud, annuler / rétablir, liens colorés selon le type (texte, image, vidéo).
-- **Nœuds** : Prompt, Import (image ou vidéo), Preview, Router, Prompt Concatenator, Crop, Prompt Enhancer, Image Describer, Video Describer, LLM.
-- **Modèles d'image** : Nano Banana Pro / 2, Seedream 5.0 Lite / 4.5, GPT Image 2, FLUX.2 [pro], FLUX.1 Kontext [pro], Qwen Image 3, Recraft V4 Pro, Ideogram V3, FLUX.1 [schnell]. Avec des images reliées en référence, l'app utilise la version « édition » du modèle.
-- **Modèles vidéo** : Kling 4 / 3 Pro / 2.5 Turbo Pro, MiniMax H3 / H3 Max, Seedance 2.5 / 2.0 / 1.0 Pro, Veo 3.1 / 3.1 Fast, Hailuo 02, Wan 2.5, LTX-2. Image de départ et de fin selon le modèle.
-- **Recast** : à partir d'une vidéo source et d'une image de personnage, deux modes. **Remplacer** garde la scène, la lumière, la caméra et le son, et remplace les personnes par vos personnages (H3 Max Recast, jusqu'à 4 personnages ; Wan 2.2 Animate Replace). **Mouvement** anime votre personnage, dans son propre décor, avec les gestes et la caméra de la vidéo (Kling 3 Motion Control Pro / Standard).
-- **Musique et son** : musique (ElevenLabs Music, Stable Audio 2.5), bruitages (ElevenLabs Sound Effects, MMAudio), son généré pour une vidéo (MMAudio), et « Ajouter le son » pour poser une piste sur une vidéo.
-- **Compositeur** : superpose images, vidéos et sons en calques, dans un éditeur plein écran (position, taille, opacité, volume, fondus, boucle, ordre). En mode timeline, chaque calque a son début et sa durée, et « Enchaîner bout à bout » monte les plans à la suite. L'export se fait sur votre ordinateur, gratuitement ; il demande [ffmpeg](https://ffmpeg.org) (voir ci-dessous).
-- **Workflows** : depuis l'accueil, crée un fichier déjà relié (vidéo source → Recast ← personnage) ; il ne reste qu'à importer ses médias et exécuter.
-- **Seedance 2.5 Draft** : génère un brouillon 480p peu coûteux, puis le finalise en 1080p d'un clic (brouillon valable 7 jours chez fal).
-- **Exécution** : « Tout exécuter » ou exécution d'un seul nœud, et bouton Arrêter. Un nœud payant qui a déjà un résultat n'est jamais relancé par « Tout exécuter », pour ne pas payer deux fois ; le coût estimé s'affiche avant de lancer.
-- **Projets** : page d'accueil avec vos fichiers, miniatures, corbeille, sauvegarde automatique.
-- **Réglages** : clé fal.ai, tarif de chaque modèle, dépenses réelles par modèle, gestion du stockage local.
+- **Node canvas**: drag and drop from the library, right-click to add a node, undo / redo, links colored by type (text, image, video).
+- **Nodes**: Prompt, Import (image or video), Preview, Router, Prompt Concatenator, Crop, Prompt Enhancer, Image Describer, Video Describer, LLM.
+- **Image models**: Nano Banana Pro / 2, Seedream 5.0 Lite / 4.5, GPT Image 2, FLUX.2 [pro], FLUX.1 Kontext [pro], Qwen Image 3, Recraft V4 Pro, Ideogram V3, FLUX.1 [schnell]. With reference images connected, the app uses the model's "edit" version.
+- **Video models**: Kling 4 / 3 Pro / 2.5 Turbo Pro, MiniMax H3 / H3 Max, Seedance 2.5 / 2.0 / 1.0 Pro, Veo 3.1 / 3.1 Fast, Hailuo 02, Wan 2.5, LTX-2. Start and end image depending on the model.
+- **Recast**: from a source video and a character image, two modes. **Replace** keeps the scene, lighting, camera and sound, and replaces the people with your characters (H3 Max Recast, up to 4 characters; Wan 2.2 Animate Replace). **Motion** animates your character, in their own setting, with the gestures and camera of the video (Kling 3 Motion Control Pro / Standard).
+- **Music and sound**: music (ElevenLabs Music, Stable Audio 2.5), sound effects (ElevenLabs Sound Effects, MMAudio), sound generated for a video (MMAudio), and "Add sound" to put a track on a video.
+- **Compositor**: stacks images, videos and sounds as layers, in a full-screen editor (position, size, opacity, volume, fades, loop, order). In timeline mode, each layer has its own start and duration, and "Chain end to end" puts the shots one after another. The export runs on your computer, for free; it needs [ffmpeg](https://ffmpeg.org) (see above).
+- **Workflows**: from the home page, creates an already wired file (source video → Recast ← character); just import your media and run.
+- **Seedance 2.5 Draft**: generates a cheap 480p draft, then finalizes it in 1080p in one click (draft valid 14 days).
+- **BytePlus ModelArk (optional)**: Seedance 2.5 with an AI-created character whose face shows, which fal refuses. The character goes through an **AI Portrait** validated by BytePlus, or through a trusted **Seedream** image. AI Portrait, Seedance 2.5 and Seedream (BytePlus) nodes, with your own account and keys. Step-by-step setup: [docs/byteplus-guide.md](docs/byteplus-guide.md).
+- **Running**: "Run all" or run a single node, and a Stop button. A paid node that already has a result is never run again by "Run all", so you never pay twice; the estimated cost shows before launching.
+- **Projects**: home page with your files, thumbnails, trash, autosave.
+- **Settings**: fal.ai key, BytePlus keys (optional), price of each model, actual spending per model, local storage management.
 
-## Prérequis
+## Requirements
 
-- **Node.js** 20 ou plus récent, et npm
-- **ffmpeg** et ffprobe, pour le Compositeur (`brew install ffmpeg`)
-- **Rust**, toolchain stable récente (testé avec 1.90) : <https://rustup.rs>
-- **macOS** : Xcode ou les Command Line Tools
-- **Windows / Linux** : les [prérequis système de Tauri](https://v2.tauri.app/start/prerequisites/)
-- Une **clé API fal.ai** : <https://fal.ai/dashboard/keys>
+- **Node.js** 20 or later, and npm
+- **ffmpeg** and ffprobe, for the Compositor (`brew install ffmpeg`)
+- **Rust**, recent stable toolchain (tested with 1.90): <https://rustup.rs>
+- **macOS**: Xcode or the Command Line Tools
+- **Windows / Linux**: the [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/)
+- A **fal.ai API key**: <https://fal.ai/dashboard/keys>
 
 ## Installation
 
-Pour simplement utiliser l'app sur une autre machine, inutile d'installer tout ça : voir [Installer sur une autre machine](#installer-sur-une-autre-machine).
+To simply use the app on another machine, you don't need any of this: see [Install on another machine](#install-on-another-machine).
 
-Sur une machine neuve (macOS) :
+On a fresh machine (macOS):
 
 ```bash
-# 1. Outils de compilation Apple
+# 1. Apple build tools
 xcode-select --install
 
-# 2. Rust, puis recharger le shell pour que `cargo` soit trouvé
+# 2. Rust, then reload the shell so `cargo` is found
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 source "$HOME/.cargo/env"
 
-# 3. Le projet et ses dépendances
+# 3. The project and its dependencies
 git clone https://github.com/Heako/simplenode-public.git
 cd simplenode
 npm install
 ```
 
-Node.js 20+ s'installe depuis <https://nodejs.org> ou avec `brew install node`.
+Node.js 20+ installs from <https://nodejs.org> or with `brew install node`.
 
-`npm install` est à relancer après chaque clone : `node_modules` n'est pas versionné. Sans lui, `npm run tauri dev` échoue avec `tauri: command not found`.
+Run `npm install` again after every clone: `node_modules` isn't versioned. Without it, `npm run tauri dev` fails with `tauri: command not found`.
 
-L'interface ne fonctionne pas dans un navigateur seul (`npm run dev` sur `localhost:3000`). Elle dépend du backend Rust et plante au démarrage avec `Cannot read properties of undefined (reading 'invoke')`. Lancez toujours l'app avec `npm run tauri dev`.
+The interface doesn't work in a browser alone (`npm run dev` on `localhost:3000`). It depends on the Rust backend and crashes on start with `Cannot read properties of undefined (reading 'invoke')`. Always launch the app with `npm run tauri dev`.
 
-## Lancer l'application
+## Run the app
 
 ```bash
 npm run tauri dev
 ```
 
-La première compilation Rust prend quelques minutes. Les suivantes sont incrémentales.
+The first Rust build takes a few minutes. The next ones are incremental.
 
-Au premier lancement :
+On first launch:
 
-1. Ouvrez **Réglages** (en bas à gauche de l'accueil).
-2. Collez votre clé fal.ai dans **Clé de génération**, puis cliquez sur **Tester**.
-3. Revenez à **Mes fichiers**, créez un **Nouveau fichier**, ajoutez des nœuds et lancez **Tout exécuter**.
+1. Open **Settings** (bottom left of the home page).
+2. Paste your fal.ai key in **Generation key**, then click **Test**.
+3. Go back to **My files**, create a **New file**, add nodes and click **Run all**.
 
-La clé est enregistrée dans un fichier privé de l'app (`keys.json` dans son dossier de configuration, lisible par votre compte uniquement), jamais dans les projets. Contrairement au trousseau macOS, il ne demande pas le mot de passe de session après chaque mise à jour de l'app. En développement uniquement, la variable d'environnement `FAL_KEY` est utilisée si aucune clé n'est enregistrée ; l'app distribuée n'utilise que la clé déclarée par l'utilisateur.
+The key is saved in a private file of the app (`keys.json` in its config folder, readable by your account only), never in projects. Unlike the macOS keychain, it doesn't ask for your session password after each app update. In development only, the `FAL_KEY` environment variable is used when no key is saved; the distributed app only uses the key the user entered.
 
-### Voir ses dépenses
+For BytePlus (optional), follow [docs/byteplus-guide.md](docs/byteplus-guide.md): account, API key, Access Key / Secret Key for portraits, then **Settings → BytePlus ModelArk**.
 
-La section **Coûts** affiche les tarifs avec n'importe quelle clé. Pour les **dépenses réelles**, fal exige une clé créée avec le preset `BILLING` ou `FULL`. Ajoutez-la dans **Clé de facturation**, sinon l'app essaie avec la clé de génération. fal ne publie pas le solde par API : un lien mène à votre tableau de bord.
+### See your spending
 
-## Compiler une version distribuable
+The **Costs** section shows prices with any key. For **actual spending**, fal requires a key created with the `BILLING` or `FULL` preset. Add it as the **Billing key**, otherwise the app tries with the generation key. fal doesn't publish the balance through its API: a link leads to your dashboard.
+
+## Build a distributable version
 
 ```bash
 npm run tauri build
 ```
 
-L'installeur est produit dans `src-tauri/target/release/bundle/` (`.app` et `.dmg` sur macOS).
+The installer is written to `src-tauri/target/release/bundle/` (`.app` and `.dmg` on macOS).
 
-### Installer sur une autre machine
+### Install on another machine
 
-Copiez le `.dmg` de `src-tauri/target/release/bundle/dmg/` sur l'autre Mac et installez l'app comme n'importe quelle autre. Node, Rust et Xcode ne sont pas nécessaires.
+Copy the `.dmg` from `src-tauri/target/release/bundle/dmg/` to the other Mac and install the app like any other. Node, Rust and Xcode aren't needed.
 
-L'app n'est pas signée : au premier lancement, macOS la bloque. Voir [Télécharger et installer](#télécharger-et-installer-sans-compétences-techniques).
+The app isn't signed: on first launch, macOS blocks it. See [Download and install](#download-and-install-no-technical-skills-needed).
 
-Pour un installeur qui fonctionne sur les Mac Apple Silicon et Intel :
+For an installer that works on both Apple Silicon and Intel Macs:
 
 ```bash
-rustup target add x86_64-apple-darwin   # une seule fois
+rustup target add x86_64-apple-darwin   # once
 RUSTFLAGS="--remap-path-prefix=$HOME=~" npm run tauri build -- --target universal-apple-darwin
 ```
 
-Le `.dmg` est alors dans `src-tauri/target/universal-apple-darwin/release/bundle/dmg/`. `RUSTFLAGS` retire les chemins de votre dossier personnel du binaire. Arrêtez `npm run tauri dev` avant de compiler : les deux utilisent le dossier `.next`.
+The `.dmg` is then in `src-tauri/target/universal-apple-darwin/release/bundle/dmg/`. `RUSTFLAGS` removes your home folder paths from the binary. Stop `npm run tauri dev` before building: both use the `.next` folder.
 
-## Problème connu : erreur de linker sur macOS 27
+## Known issue: linker error on macOS 27
 
-Avec les Command Line Tools de macOS 27, toute compilation Rust peut échouer avec :
+With the macOS 27 Command Line Tools, any Rust build can fail with:
 
 ```
 ld: tapi error: malformed file
 .../MacOSX27.0.sdk/usr/lib/libSystem.B.tbd: error: unknown architecture arm64e.x1-macos
 ```
 
-Le SDK fourni contient une architecture que le linker installé ne reconnaît pas encore.
+The bundled SDK contains an architecture the installed linker doesn't know yet.
 
-**Solution :** mettez Xcode à jour (corrigé avec **Xcode 27.1**), puis :
+**Fix:** update Xcode (fixed in **Xcode 27.1**), then:
 
 ```bash
 sudo xcode-select -s /Applications/Xcode.app
@@ -138,81 +141,84 @@ sudo xcodebuild -license accept
 cd src-tauri && cargo clean && cargo build
 ```
 
-Si vous ne pouvez pas mettre Xcode à jour, compilez contre un SDK plus ancien présent sur la machine (il ne contient pas le fichier en cause), en créant `src-tauri/.cargo/config.toml` (ignoré par git, car propre à chaque machine) avec `SDKROOT` pointant vers ce SDK :
+If you can't update Xcode, build against an older SDK present on the machine (it doesn't contain the faulty file), by creating `src-tauri/.cargo/config.toml` (ignored by git, as it is specific to each machine) with `SDKROOT` pointing to that SDK:
 
 ```toml
 [env]
 SDKROOT = "/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk"
 ```
 
-Les SDK disponibles se listent avec `ls /Library/Developer/CommandLineTools/SDKs/`.
+List the available SDKs with `ls /Library/Developer/CommandLineTools/SDKs/`.
 
-## Où sont les données
+## Where the data lives
 
-Dans le dossier de données de l'application. Sur macOS : `~/Library/Application Support/com.simplenode.app/`.
+In the application's data folder. On macOS: `~/Library/Application Support/com.simplenode.app/`.
 
-- `projects/` : un fichier JSON par projet
-- `images/` : images et vidéos importées ou générées. Les URLs de fal expirent, donc chaque résultat est téléchargé immédiatement.
+- `projects/`: one JSON file per project
+- `images/`: imported or generated images and videos. fal and BytePlus URLs expire, so every result is downloaded right away.
+- `byteplus-trusted.json`: the original address of Seedream (BytePlus) images, to send them to Seedance as is.
 
-**Réglages → Stockage** affiche l'espace utilisé et supprime les médias qui ne servent plus à aucun projet.
+**Settings → Storage** shows the space used and deletes media no project uses anymore.
 
-## Structure du code
+## Code structure
 
 ```
-src/                      Interface (Next.js en export statique)
+src/                      Interface (Next.js static export)
   components/
-    App.tsx               Bascule accueil ↔ éditeur
-    Home.tsx              Accueil : fichiers, corbeille
-    Settings.tsx          Réglages : clés, coûts, stockage
-    Editor.tsx            Canvas, sauvegarde automatique
-    Library.tsx           Bibliothèque de nœuds (panneau gauche)
-    ContextMenus.tsx      Menus du clic droit
-    nodes.tsx             Rendu de chaque type de nœud
-    CompositorEditor.tsx  Éditeur plein écran du Compositeur
-    ProviderIcon.tsx      Logos des fournisseurs
+    App.tsx               Switches home ↔ editor
+    Home.tsx              Home: files, trash
+    Settings.tsx          Settings: keys, costs, storage
+    Editor.tsx            Canvas, autosave
+    Library.tsx           Node library (left panel)
+    ContextMenus.tsx      Right-click menus
+    nodes.tsx             Rendering of each node type
+    CompositorEditor.tsx  Full-screen Compositor editor
+    ProviderIcon.tsx      Provider logos
   lib/
-    spec.ts               Types de ports, nœuds, entrées/sorties
-    store.ts              État du graphe (Zustand), historique
-    projects.ts           Lecture / écriture des projets
-    cost.ts               Coût à la seconde des modèles vidéo → vidéo
+    spec.ts               Port types, nodes, inputs/outputs
+    store.ts              Graph state (Zustand), history
+    projects.ts           Reading / writing projects
+    cost.ts               Per-second cost of video → video models
+    byteplus.ts           BytePlus keys, options and cost estimates
 
-src-tauri/src/            Backend Rust
-  models.rs               Registre des modèles fal (source de vérité)
-  graph.rs                Exécution du graphe
-  recast.rs               Recast : modes, découpage en segments
-  compose.rs              Compositeur : rendu des calques avec ffmpeg
-  fal.rs                  Client fal : file d'attente, upload, brouillons
-  account.rs              Clés (fichier privé), tarifs, dépenses
-  projects.rs             Fichiers projets
-  storage.rs              Médias locaux, crop, nettoyage
-  lib.rs                  Commandes Tauri
+src-tauri/src/            Rust backend
+  models.rs               fal model registry (source of truth)
+  graph.rs                Graph execution
+  recast.rs               Recast: modes, splitting into segments
+  compose.rs              Compositor: layer rendering with ffmpeg
+  fal.rs                  fal client: queue, upload, drafts
+  byteplus.rs             BytePlus client: Seedance, Seedream, portraits
+  account.rs              Keys (private file), prices, spending
+  projects.rs             Project files
+  storage.rs              Local media, crop, cleanup
+  lib.rs                  Tauri commands
 ```
 
-### Ajouter un modèle fal
+### Add a fal model
 
-1. Récupérez son schéma : `https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=<endpoint>`.
-2. Ajoutez une entrée dans `MODELS` ou `VIDEO_MODELS` (`src-tauri/src/models.rs`), avec ses endpoints texte et image, le champ des images de référence et ses paramètres.
-3. Lancez `cargo test` dans `src-tauri/` : un test vérifie la cohérence du registre.
-4. Optionnel : ajoutez son logo dans `MODEL_LOGOS` (`src/components/ProviderIcon.tsx`).
+1. Get its schema: `https://fal.ai/api/openapi/queue/openapi.json?endpoint_id=<endpoint>`.
+2. Add an entry to `MODELS` or `VIDEO_MODELS` (`src-tauri/src/models.rs`), with its text and image endpoints, the reference image field and its parameters.
+3. Run `cargo test` in `src-tauri/`: a test checks the registry is consistent.
+4. Optional: add its logo to `MODEL_LOGOS` (`src/components/ProviderIcon.tsx`).
 
-L'interface (bibliothèque, ports, réglages, tarifs) se construit automatiquement à partir du registre.
+The interface (library, ports, settings, prices) is built automatically from the registry.
 
-## Vérifications
+## Checks
 
 ```bash
 npx tsc --noEmit                   # types
 npm run lint                       # lint
-cd src-tauri && cargo test         # tests Rust
-cd src-tauri && cargo clippy       # lint Rust
+cd src-tauri && cargo test         # Rust tests
+cd src-tauri && cargo clippy       # Rust lint
 ```
 
-## Crédits
+## Credits
 
-- Logos des fournisseurs : [@lobehub/icons](https://github.com/lobehub/lobe-icons) (licence MIT). Ces logos sont des marques de leurs propriétaires respectifs et servent uniquement à identifier le fournisseur de chaque modèle. Voir `public/providers/ATTRIBUTION.md`.
-- Icônes de l'interface : [Lucide](https://lucide.dev).
+- Provider logos: [@lobehub/icons](https://github.com/lobehub/lobe-icons) (MIT license). These logos are trademarks of their respective owners and only identify the provider of each model. See `public/providers/ATTRIBUTION.md`.
+- Interface icons: [Lucide](https://lucide.dev).
 
-## Licence
+## License
 
-© 2026 LUDACOM SARL. Tous droits réservés.
+© 2026 LUDACOM SARL. All rights reserved.
 
-Le code source est publié pour consultation. Aucune licence n'est accordée pour le copier, le modifier ou le redistribuer sans l'accord écrit de LUDACOM SARL.
+The source code is published for reference. No license is granted to copy, modify or redistribute it without the written consent of LUDACOM SARL.

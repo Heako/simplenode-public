@@ -36,10 +36,10 @@ type Tab = "files" | "workflows" | "trash" | "settings";
 type View = "grid" | "list";
 
 const TITLES: Record<Tab, string> = {
-  files: "Mon espace de travail",
+  files: "My workspace",
   workflows: "Workflows",
-  trash: "Corbeille",
-  settings: "Réglages",
+  trash: "Trash",
+  settings: "Settings",
 };
 
 /** Ready-made graphs; picking one creates a file that starts from it. */
@@ -53,11 +53,11 @@ function Workflows({ onPick, compact, onMore }: { onPick: (workflow: WorkflowDef
         <div className="mt-8 flex items-center gap-3">
           <h2 className="mr-auto text-[15px] font-medium">Workflows</h2>
           <button className="flex items-center gap-1 text-[12px] text-muted hover:text-fg" onClick={onMore}>
-            Tout voir <ArrowRight size={13} />
+            See all <ArrowRight size={13} />
           </button>
         </div>
       ) : (
-        <p className="mt-2 text-[13px] text-muted">Un workflow crée un nouveau fichier déjà relié : il ne reste qu&apos;à importer vos médias et exécuter.</p>
+        <p className="mt-2 text-[13px] text-muted">A workflow creates a new, already wired file: just import your media and run.</p>
       )}
       <div className={`${compact ? "mt-4" : "mt-6"} grid grid-cols-[repeat(auto-fill,minmax(300px,1fr))] gap-5`}>
         {WORKFLOWS.map((w) => (
@@ -94,7 +94,7 @@ function Workflows({ onPick, compact, onMore }: { onPick: (workflow: WorkflowDef
   );
 }
 
-const rtf = new Intl.RelativeTimeFormat("fr", { numeric: "auto" });
+const rtf = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
   ["year", 31_536_000_000],
   ["month", 2_592_000_000],
@@ -106,9 +106,9 @@ const UNITS: [Intl.RelativeTimeFormatUnit, number][] = [
 function edited(ms: number) {
   const diff = ms - Date.now();
   for (const [unit, size] of UNITS) {
-    if (Math.abs(diff) >= size) return `Modifié ${rtf.format(Math.round(diff / size), unit)}`;
+    if (Math.abs(diff) >= size) return `Edited ${rtf.format(Math.round(diff / size), unit)}`;
   }
-  return "Modifié à l'instant";
+  return "Edited just now";
 }
 
 function Thumbnail({ meta, className }: { meta: ProjectMeta; className: string }) {
@@ -155,14 +155,14 @@ function FileMenu({
   const entries =
     tab === "files"
       ? ([
-          ["open", "Ouvrir", FolderOpen],
-          ["rename", "Renommer", PencilLine],
-          ["duplicate", "Dupliquer", Copy],
-          ["trash", "Mettre à la corbeille", Trash2],
+          ["open", "Open", FolderOpen],
+          ["rename", "Rename", PencilLine],
+          ["duplicate", "Duplicate", Copy],
+          ["trash", "Move to trash", Trash2],
         ] as const)
       : ([
-          ["restore", "Restaurer", ArchiveRestore],
-          ["delete", "Supprimer définitivement", Trash2],
+          ["restore", "Restore", ArchiveRestore],
+          ["delete", "Delete permanently", Trash2],
         ] as const);
 
   return (
@@ -238,7 +238,7 @@ export default function Home() {
 
   async function create(workflow?: WorkflowDef) {
     const graph = workflow?.build() ?? { nodes: [], edges: [] };
-    const project = { id: newProjectId(), title: workflow?.title ?? "Sans titre", updatedAt: 0, thumbnail: null, trashed: false, ...graph };
+    const project = { id: newProjectId(), title: workflow?.title ?? "Untitled", updatedAt: 0, thumbnail: null, trashed: false, ...graph };
     try {
       await saveProject(project);
       openProject(project);
@@ -261,7 +261,7 @@ export default function Home() {
           return setRenaming(meta.id);
         case "duplicate": {
           const src = await loadProject(meta.id);
-          await saveProject({ ...src, id: newProjectId(), title: `${src.title} (copie)` });
+          await saveProject({ ...src, id: newProjectId(), title: `${src.title} (copy)` });
           break;
         }
         case "trash":
@@ -318,14 +318,14 @@ export default function Home() {
           className="mt-4 flex items-center justify-center gap-2 rounded-lg bg-fg py-2 text-[13px] font-medium text-bg hover:opacity-90"
           onClick={() => create()}
         >
-          <Plus size={15} /> Nouveau fichier
+          <Plus size={15} /> New file
         </button>
         <nav className="mt-4 space-y-0.5">
-          {navItem("files", "Mes fichiers", FolderOpen)}
+          {navItem("files", "My files", FolderOpen)}
           {navItem("workflows", "Workflows", LayoutTemplate)}
-          {navItem("trash", "Corbeille", Trash2)}
+          {navItem("trash", "Trash", Trash2)}
         </nav>
-        <div className="mt-auto">{navItem("settings", "Réglages", SettingsIcon)}</div>
+        <div className="mt-auto">{navItem("settings", "Settings", SettingsIcon)}</div>
       </aside>
 
       <main className="flex-1 overflow-y-auto">
@@ -334,7 +334,7 @@ export default function Home() {
             <h1 className="text-[17px] font-medium">{TITLES[tab]}</h1>
             {tab === "files" && (
               <button className="flex items-center gap-2 rounded-lg bg-fg px-3.5 py-2 text-[13px] font-medium text-bg hover:opacity-90" onClick={() => create()}>
-                <Plus size={15} /> Nouveau fichier
+                <Plus size={15} /> New file
               </button>
             )}
           </header>
@@ -347,12 +347,12 @@ export default function Home() {
             <>
               {tab === "files" && !query && <Workflows compact onPick={(w) => create(w)} onMore={() => setTab("workflows")} />}
               <div className="mt-8 flex items-center gap-3">
-                <h2 className="mr-auto text-[15px] font-medium">{tab === "files" ? "Mes fichiers" : "Fichiers supprimés"}</h2>
+                <h2 className="mr-auto text-[15px] font-medium">{tab === "files" ? "My files" : "Deleted files"}</h2>
                 <div className="flex w-64 items-center gap-2 rounded-lg bg-panel px-3 py-1.5 focus-within:ring-1 focus-within:ring-accent">
                   <Search size={14} className="text-muted" />
                   <input
                     className="w-full bg-transparent text-[13px] outline-none placeholder:text-muted"
-                    placeholder="Rechercher"
+                    placeholder="Search"
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                   />
@@ -380,7 +380,7 @@ export default function Home() {
 
               {!visible.length ? (
                 <div className="mt-16 text-center text-[13px] text-muted">
-                  {query ? "Aucun fichier ne correspond." : tab === "files" ? "Aucun fichier pour l'instant. Créez-en un avec « Nouveau fichier »." : "La corbeille est vide."}
+                  {query ? "No matching file." : tab === "files" ? "No files yet. Create one with \"New file\"." : "The trash is empty."}
                 </div>
               ) : view === "grid" ? (
                 <div className="mt-5 grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-5">

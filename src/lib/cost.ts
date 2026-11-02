@@ -85,9 +85,9 @@ export function seedanceEstimate(
   return { cost: (tokens / 1000) * per1k, tokens, seconds, auto, resolution: res };
 }
 
-/** "16,50 $" */
+/** "$16.50" */
 export function dollars(value: number) {
-  return `${value.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 /** Duration in seconds of a local or remote video, once its metadata loads. */

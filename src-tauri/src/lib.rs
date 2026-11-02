@@ -1,5 +1,6 @@
 mod account;
 mod angles;
+mod byteplus;
 mod compose;
 mod error;
 mod fal;
@@ -16,7 +17,7 @@ use std::path::PathBuf;
 use tauri::{AppHandle, State};
 
 use account::KeyKind;
-use error::Result;
+use error::{CommandError, Result};
 use graph::{GraphEdge, GraphNode};
 
 struct AppState {
@@ -127,7 +128,8 @@ async fn run_graph(
     target: Option<String>,
 ) -> Result<()> {
     // Runs may overlap: graph::run shares the nodes they have in common.
-    let fal = fal::Fal::new(state.http.clone(), account::main_key()?);
+    // The fal key is only required by nodes that call fal (BytePlus nodes don't).
+    let fal = fal::Fal::new(state.http.clone(), account::main_key().unwrap_or_default());
     graph::run(&app, &fal, &state.http, nodes, edges, target).await
 }
 
@@ -140,7 +142,7 @@ async fn crop_image(app: AppHandle, value: String, params: std::collections::Has
         Ok(storage::crop(&app, &value, &spec)?.to_string_lossy().into_owned())
     })
     .await
-    .map_err(|e| error::AppError::Invalid(format!("Recadrage interrompu : {e}")))?
+    .map_err(|e| error::AppError::Invalid(format!("Crop interrupted: {e}")))?
 }
 
 #[tauri::command]
@@ -172,10 +174,33 @@ fn stop_nodes(ids: Option<Vec<String>>) {
 
 /// Renders a Seedance draft in 1080p and stores it locally.
 #[tauri::command]
-async fn finalize_draft(app: AppHandle, state: State<'_, AppState>, draft_id: String) -> Result<String> {
+async fn finalize_draft(app: AppHandle, state: State<'_, AppState>, draft_id: String) -> std::result::Result<String, CommandError> {
     let fal = fal::Fal::new(state.http.clone(), account::main_key()?);
     let url = fal.complete_draft(&draft_id).await?;
     Ok(storage::download(&app, &state.http, &url).await?.to_string_lossy().into_owned())
+}
+
+/// Renders a BytePlus Seedance 2.5 Draft in 1080p and stores it locally.
+#[tauri::command]
+async fn finalize_byteplus_draft(app: AppHandle, state: State<'_, AppState>, draft_id: String) -> std::result::Result<String, CommandError> {
+    let bp = byteplus::BytePlus::from_account(&state.http)?;
+    let video = bp.video(&byteplus::finalize_body(&draft_id)).await?;
+    Ok(storage::download(&app, &state.http, &video.url).await?.to_string_lossy().into_owned())
+}
+
+/// "Test connection": the API key, and the AK/SK when they are saved.
+#[tauri::command]
+async fn test_byteplus(state: State<'_, AppState>, which: String) -> Result<()> {
+    match which.as_str() {
+        "aksk" => byteplus::Assets::from_account(&state.http)?.test().await,
+        _ => byteplus::BytePlus::from_account(&state.http)?.test().await,
+    }
+}
+
+/// A portrait's review status in the BytePlus library.
+#[tauri::command]
+async fn byteplus_asset_status(state: State<'_, AppState>, asset_id: String) -> Result<byteplus::AssetState> {
+    byteplus::Assets::from_account(&state.http)?.state(&asset_id).await
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -220,7 +245,10 @@ pub fn run() {
             mcp_configure,
             mcp_regenerate_token,
             mcp_reply,
-            finalize_draft
+            finalize_draft,
+            finalize_byteplus_draft,
+            test_byteplus,
+            byteplus_asset_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

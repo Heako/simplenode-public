@@ -141,7 +141,16 @@ impl Fal {
         format!("Key {}", self.key)
     }
 
+    /// The fal key is optional until a node actually calls fal.
+    fn ensure_key(&self) -> Result<()> {
+        if self.key.is_empty() {
+            return Err(AppError::MissingKey);
+        }
+        Ok(())
+    }
+
     pub async fn subscribe(&self, endpoint: &str, input: Value) -> Result<Value> {
+        self.ensure_key()?;
         let res = self
             .http
             .post(format!("{QUEUE_URL}/{endpoint}"))
@@ -149,13 +158,15 @@ impl Fal {
             .json(&input)
             .send()
             .await?;
-        let job: Submitted = check(res).await?.json().await?;
+        // A request refused at submission never ran, so it isn't billed.
+        let res = check(res).await.map_err(|e| AppError::Refused(e.to_string()))?;
+        let job: Submitted = res.json().await?;
         let mut cancel = CancelOnDrop { http: self.http.clone(), auth: self.auth(), url: job.cancel_url.clone() };
 
         let started = Instant::now();
         loop {
             if started.elapsed() > TIMEOUT {
-                return Err(AppError::Fal("délai dépassé".into()));
+                return Err(AppError::Fal("timed out".into()));
             }
             tokio::time::sleep(POLL_INTERVAL).await;
             let res = self.http.get(&job.status_url).header(AUTHORIZATION, self.auth()).send().await?;
@@ -173,6 +184,7 @@ impl Fal {
 
     /// Uploads a local file to fal storage (same protocol as the official JS client).
     pub async fn upload(&self, path: &Path) -> Result<String> {
+        self.ensure_key()?;
         let mime = storage::mime_for(&storage::extension(path)).unwrap_or("application/octet-stream");
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("upload");
         let res = self
@@ -193,7 +205,7 @@ impl Fal {
     pub async fn complete_draft(&self, draft_id: &str) -> Result<String> {
         let input = json!({ "draft_id": draft_id, "resolution": "1080p" });
         let out = self.subscribe(SEEDANCE_DRAFT_COMPLETE_ENDPOINT, input).await?;
-        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))
+        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
     }
 
     /// Cuts `duration` seconds from `start` out of a hosted video. Returns the
@@ -201,7 +213,7 @@ impl Fal {
     pub async fn trim_video(&self, video_url: &str, start: f64, duration: f64) -> Result<(String, f64)> {
         let input = json!({ "video_url": video_url, "start_time": start, "duration": duration });
         let out = self.subscribe(TRIM_VIDEO_ENDPOINT, input).await?;
-        let url = out["video"]["url"].as_str().ok_or_else(|| AppError::Fal("réponse vide".into()))?;
+        let url = out["video"]["url"].as_str().ok_or_else(|| AppError::Fal("empty response".into()))?;
         Ok((url.to_owned(), out["original_duration"].as_f64().unwrap_or_default()))
     }
 
@@ -210,18 +222,18 @@ impl Fal {
     pub async fn merge_audio_video(&self, video_url: &str, audio_url: &str, offset: f64) -> Result<String> {
         let input = json!({ "video_url": video_url, "audio_url": audio_url, "start_offset": offset });
         let out = self.subscribe(MERGE_AUDIO_VIDEO_ENDPOINT, input).await?;
-        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))
+        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
     }
 
     pub async fn merge_videos(&self, urls: &[String]) -> Result<String> {
         let out = self.subscribe(MERGE_VIDEOS_ENDPOINT, json!({ "video_urls": urls })).await?;
-        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))
+        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
     }
 
     pub async fn describe_video(&self, video_url: &str, prompt: &str, detailed: bool) -> Result<String> {
         let input = json!({ "video_url": video_url, "prompt": prompt, "detailed_analysis": detailed });
         let out = self.subscribe(VIDEO_UNDERSTANDING_ENDPOINT, input).await?;
-        out["output"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))
+        out["output"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
     }
 
     /// Runs a registry model. With references it uses the edit (or
@@ -235,9 +247,9 @@ impl Fal {
     ) -> Result<ModelOutput> {
         let ModelCall { prompt, system, refs, end_frame, negative, media } = call;
         let endpoint = if refs.is_empty() {
-            def.text_endpoint.ok_or_else(|| AppError::Invalid(format!("{} exige une image de référence", def.label)))?
+            def.text_endpoint.ok_or_else(|| AppError::Invalid(format!("{} needs a reference image", def.label)))?
         } else {
-            def.edit_endpoint.ok_or_else(|| AppError::Invalid(format!("{} n'accepte pas d'image", def.label)))?
+            def.edit_endpoint.ok_or_else(|| AppError::Invalid(format!("{} doesn't take images", def.label)))?
         };
 
         let mut input = model_params(def, params, !refs.is_empty());
@@ -279,12 +291,12 @@ impl Fal {
         }
         match (end_frame, def.end_field) {
             (Some(_), _) if refs.is_empty() => {
-                return Err(AppError::Invalid("Une image de fin demande aussi une image de départ".into()));
+                return Err(AppError::Invalid("An end image also needs a start image".into()));
             }
             (Some(frame), Some(field)) => {
                 input.insert(field.into(), json!(frame));
             }
-            (Some(_), None) => return Err(AppError::Invalid(format!("{} n'accepte pas d'image de fin", def.label))),
+            (Some(_), None) => return Err(AppError::Invalid(format!("{} doesn't take an end image", def.label))),
             (None, _) => {}
         }
 
@@ -295,7 +307,7 @@ impl Fal {
             Category::Llm => out["output"].as_str(),
             Category::Audio => out["audio"]["url"].as_str(),
         };
-        let value = value.map(str::to_owned).ok_or_else(|| AppError::Fal("réponse vide".into()))?;
+        let value = value.map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))?;
         let draft_id = out["draft_id"].as_str().map(str::to_owned);
         Ok(ModelOutput { value, draft_id })
     }

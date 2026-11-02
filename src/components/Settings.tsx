@@ -3,18 +3,22 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Bot, Check, Coffee, Copy, Eye, EyeOff, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
+import { Bot, Check, Clapperboard, Coffee, Copy, Eye, EyeOff, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import ProviderIcon from "./ProviderIcon";
 import { useModels } from "@/lib/spec";
 import { perSecondRows } from "@/lib/cost";
 import { useMcpSpend, type McpStatus } from "@/lib/mcp";
+import { BYTEPLUS_LINKS, useBytePlusKeys } from "@/lib/byteplus";
 
-type KeyKind = "main" | "billing";
+type KeyKind = "main" | "billing" | "byteplus" | "byteplusAk" | "byteplusSk";
 
 interface KeyStatus {
   main: "saved" | "env" | null;
   billing: boolean;
+  byteplus: boolean;
+  byteplusAk: boolean;
+  byteplusSk: boolean;
 }
 
 interface PriceRow {
@@ -44,29 +48,29 @@ const FAL_KEYS_URL = "https://fal.ai/dashboard/keys";
 const FAL_BILLING_URL = "https://fal.ai/dashboard/billing";
 
 const money = (value: number, currency = "USD") =>
-  new Intl.NumberFormat("fr-FR", { style: "currency", currency, maximumFractionDigits: value < 1 ? 4 : 2 }).format(value);
+  new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: value < 1 ? 4 : 2 }).format(value);
 
 const bytes = (n: number) => {
-  const units = ["o", "Ko", "Mo", "Go"];
+  const units = ["B", "KB", "MB", "GB"];
   let i = 0;
   while (n >= 1024 && i < units.length - 1) {
     n /= 1024;
     i++;
   }
-  return `${n.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} ${units[i]}`;
+  return `${n.toLocaleString("en-US", { maximumFractionDigits: 1 })} ${units[i]}`;
 };
 
 const UNIT_LABELS: Record<string, string> = {
   image: "image",
   images: "image",
-  megapixels: "mégapixel",
-  seconds: "seconde",
-  second: "seconde",
-  video: "vidéo",
-  videos: "vidéo",
-  "1000 tokens": "1 000 tokens",
-  units: "unité",
-  requests: "requête",
+  megapixels: "megapixel",
+  seconds: "second",
+  second: "second",
+  video: "video",
+  videos: "video",
+  "1000 tokens": "1,000 tokens",
+  units: "unit",
+  requests: "request",
 };
 
 const unitLabel = (unit: string | null) => (unit ? (UNIT_LABELS[unit] ?? unit) : "");
@@ -95,7 +99,22 @@ function ExternalLinkButton({ href, children }: { href: string; children: ReactN
   );
 }
 
-function KeyField({ kind, configured, label, hint, onSaved }: { kind: KeyKind; configured: boolean; label: string; hint: ReactNode; onSaved: () => void }) {
+function KeyField({
+  kind,
+  configured,
+  label,
+  hint,
+  onSaved,
+  testable = true,
+}: {
+  kind: KeyKind;
+  configured: boolean;
+  label: string;
+  hint: ReactNode;
+  onSaved: () => void;
+  /** BytePlus keys are tested together, from their section's button. */
+  testable?: boolean;
+}) {
   const [value, setValue] = useState("");
   const [state, setState] = useState<{ busy?: boolean; ok?: string; error?: string }>({});
 
@@ -115,7 +134,7 @@ function KeyField({ kind, configured, label, hint, onSaved }: { kind: KeyKind; c
       <div className="flex items-center gap-2">
         <span className="text-[13px]">{label}</span>
         <span className={`rounded px-1.5 py-0.5 text-[10px] ${configured ? "bg-emerald-500/15 text-emerald-300" : "bg-panel-2 text-muted"}`}>
-          {configured ? "Configurée" : "Absente"}
+          {configured ? "Set" : "Missing"}
         </span>
       </div>
       <p className="mt-1 text-[12px] text-muted">{hint}</p>
@@ -123,30 +142,32 @@ function KeyField({ kind, configured, label, hint, onSaved }: { kind: KeyKind; c
         <input
           type="password"
           className="flex-1 rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-[13px] outline-none focus:border-accent"
-          placeholder={configured ? "Coller une nouvelle clé pour la remplacer" : "Coller la clé"}
+          placeholder={configured ? "Paste a new key to replace it" : "Paste the key"}
           value={value}
           onChange={(e) => setValue(e.target.value)}
         />
         <button
           className="rounded-lg bg-fg px-3 py-1.5 text-[12px] font-medium text-bg disabled:opacity-40"
           disabled={!value.trim() || state.busy}
-          onClick={() => act(() => invoke("set_fal_key", { kind, key: value }).then(() => setValue("")), "Clé enregistrée.")}
+          onClick={() => act(() => invoke("set_fal_key", { kind, key: value }).then(() => setValue("")), "Key saved.")}
         >
-          Enregistrer
+          Save
         </button>
-        <button
-          className="rounded-lg border border-line px-3 py-1.5 text-[12px] disabled:opacity-40"
-          disabled={!configured || state.busy}
-          onClick={() => act(() => invoke("test_fal_key", { kind }), "La clé fonctionne.")}
-        >
-          Tester
-        </button>
+        {testable && (
+          <button
+            className="rounded-lg border border-line px-3 py-1.5 text-[12px] disabled:opacity-40"
+            disabled={!configured || state.busy}
+            onClick={() => act(() => invoke("test_fal_key", { kind }), "The key works.")}
+          >
+            Test
+          </button>
+        )}
         <button
           className="rounded-lg px-2 py-1.5 text-[12px] text-red-300 disabled:opacity-40"
           disabled={!configured || state.busy}
-          onClick={() => act(() => invoke("set_fal_key", { kind, key: "" }), "Clé supprimée.")}
+          onClick={() => act(() => invoke("set_fal_key", { kind, key: "" }), "Key deleted.")}
         >
-          Supprimer
+          Delete
         </button>
       </div>
       {state.busy && <Loader2 size={13} className="mt-2 animate-spin text-muted" />}
@@ -168,19 +189,19 @@ function KeysSection() {
   }, [refresh]);
 
   return (
-    <Section id="keys" icon={KeyRound} title="Clé API fal.ai" description="Stockées sur cet ordinateur dans un fichier privé de l'app, jamais dans vos projets.">
+    <Section id="keys" icon={KeyRound} title="fal.ai API key" description="Stored on this computer in a private file of the app, never in your projects.">
       <div className="divide-y divide-line">
         <KeyField
           kind="main"
           configured={!!status?.main}
-          label="Clé de génération"
+          label="Generation key"
           onSaved={refresh}
           hint={
             status?.main === "env" ? (
-              "Lue depuis la variable d'environnement FAL_KEY. Enregistrez-en une ici pour la remplacer."
+              "Read from the FAL_KEY environment variable. Save one here to replace it."
             ) : (
               <>
-                Utilisée pour exécuter les modèles. <ExternalLinkButton href={FAL_KEYS_URL}>Gérer mes clés sur fal.ai</ExternalLinkButton>
+                Used to run the models. <ExternalLinkButton href={FAL_KEYS_URL}>Manage my keys on fal.ai</ExternalLinkButton>
               </>
             )
           }
@@ -188,27 +209,167 @@ function KeysSection() {
         <KeyField
           kind="billing"
           configured={!!status?.billing}
-          label="Clé de facturation (optionnelle)"
+          label="Billing key (optional)"
           onSaved={refresh}
-          hint="Pour afficher vos dépenses. fal exige une clé créée avec le preset BILLING ou FULL ; sinon la clé de génération est utilisée."
+          hint="To show your spending. fal requires a key created with the BILLING or FULL preset; otherwise the generation key is used."
         />
       </div>
     </Section>
   );
 }
 
+/** The user's own BytePlus ModelArk account: optional, billed by BytePlus. */
+function BytePlusSection() {
+  const [status, setStatus] = useState<KeyStatus | null>(null);
+  const [test, setTest] = useState<{ busy?: boolean; results?: [string, string | null][] }>({});
+  const refreshKeys = useBytePlusKeys((s) => s.refresh);
+  const refresh = useCallback(() => {
+    invoke<KeyStatus>("key_status").then(setStatus);
+    // The nodes show or hide their "add your key" notice.
+    refreshKeys();
+  }, [refreshKeys]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+
+  async function testConnection() {
+    setTest({ busy: true });
+    const results: [string, string | null][] = [];
+    const run = async (label: string, which: string) => {
+      try {
+        await invoke("test_byteplus", { which });
+        results.push([label, null]);
+      } catch (err) {
+        results.push([label, String(err)]);
+      }
+    };
+    await run("API key (Seedance, Seedream)", "api");
+    if (status?.byteplusAk && status?.byteplusSk) await run("Access Key / Secret Key (portraits)", "aksk");
+    setTest({ results });
+  }
+
+  const step = "flex gap-2 text-[12px] text-muted";
+  return (
+    <Section
+      id="byteplus"
+      icon={Clapperboard}
+      title="BytePlus ModelArk"
+      description="Optional. Seedance 2.5 with an AI character whose face shows, through portraits validated by BytePlus. Your own account and keys: billed by BytePlus."
+    >
+      <div className="divide-y divide-line">
+        <KeyField
+          kind="byteplus"
+          configured={!!status?.byteplus}
+          label="API key"
+          onSaved={refresh}
+          testable={false}
+          hint={
+            <>
+              For Seedance 2.5 and Seedream. <ExternalLinkButton href={BYTEPLUS_LINKS.apiKey}>Create an API key</ExternalLinkButton>
+            </>
+          }
+        />
+        <KeyField
+          kind="byteplusAk"
+          configured={!!status?.byteplusAk}
+          label="Access Key (AK)"
+          onSaved={refresh}
+          testable={false}
+          hint={
+            <>
+              For the portrait library only: BytePlus doesn&apos;t accept the API key there.{" "}
+              <ExternalLinkButton href={BYTEPLUS_LINKS.accessKey}>Create an Access Key</ExternalLinkButton>
+            </>
+          }
+        />
+        <KeyField kind="byteplusSk" configured={!!status?.byteplusSk} label="Secret Key (SK)" onSaved={refresh} testable={false} hint="Given with the Access Key, shown only once by BytePlus." />
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-line pt-3">
+        <label className="flex items-center gap-2 text-[12px]">
+          Region
+          <select className="rounded-md border border-line bg-panel-2 px-2 py-1 text-[12px] outline-none" value="ap-southeast-1" disabled>
+            <option value="ap-southeast-1">ap-southeast-1 (Johor)</option>
+          </select>
+        </label>
+        <span className="text-[11px] text-muted">The only region described in the BytePlus documentation.</span>
+        <button
+          className="ml-auto rounded-lg border border-line px-3 py-1.5 text-[12px] disabled:opacity-40"
+          disabled={!status?.byteplus || test.busy}
+          onClick={testConnection}
+        >
+          Test connection
+        </button>
+      </div>
+      {test.busy && <Loader2 size={13} className="mt-2 animate-spin text-muted" />}
+      {test.results?.map(([label, error]) => (
+        <p key={label} className={`mt-2 flex items-start gap-1 text-[12px] ${error ? "text-red-300" : "text-emerald-300"}`}>
+          {error ? `${label}: ${error}` : <><Check size={12} className="mt-0.5" /> {label}: connected.</>}
+        </p>
+      ))}
+
+      <div className="mt-5 space-y-1.5 border-t border-line pt-4">
+        <h3 className="text-[13px] font-medium">Getting started, in the BytePlus console</h3>
+        <p className={step}>
+          <span className="text-fg">1.</span>
+          <span>
+            Create an account and get it verified. <ExternalLinkButton href={BYTEPLUS_LINKS.signup}>Create an account</ExternalLinkButton>
+          </span>
+        </p>
+        <p className={step}>
+          <span className="text-fg">2.</span>
+          <span>
+            Seedance 2.5 requires a balance of at least $30 (or an AI Savings Plan, or a Seedance pack), then activating the model.{" "}
+            <ExternalLinkButton href={BYTEPLUS_LINKS.topUp}>Top up</ExternalLinkButton> ·{" "}
+            <ExternalLinkButton href={BYTEPLUS_LINKS.activate}>Activate models</ExternalLinkButton>
+          </span>
+        </p>
+        <p className={step}>
+          <span className="text-fg">3.</span>
+          <span>
+            For portraits: activate the “Advanced Creation Rights”. When the first portrait group is created, BytePlus asks you to sign an authorization
+            letter. <ExternalLinkButton href={BYTEPLUS_LINKS.rights}>Advanced Creation Rights</ExternalLinkButton> ·{" "}
+            <ExternalLinkButton href={BYTEPLUS_LINKS.portraits}>My portraits</ExternalLinkButton>
+          </span>
+        </p>
+        <p className={step}>
+          <span className="text-fg">4.</span>
+          <span>
+            Create the API key (ModelArk → API keys): copy the “API Key”; the “Resource ID” isn&apos;t needed. <ExternalLinkButton href={BYTEPLUS_LINKS.apiKey}>API keys</ExternalLinkButton>
+          </span>
+        </p>
+        <p className={step}>
+          <span className="text-fg">5.</span>
+          <span>
+            For portraits, a limited Access Key and Secret Key: IAM → Permission policy → create a JSON policy allowing <code>ark:*Asset*</code>, attach it
+            (Authorize) to the <code>simplenode-…</code> user created with the API key, then open that user → Create access key. The Secret Key is
+            shown only once. <ExternalLinkButton href={BYTEPLUS_LINKS.iam}>IAM</ExternalLinkButton>
+          </span>
+        </p>
+        <p className={step}>
+          <span className="text-fg">6.</span>
+          <span>Paste the three values above, save each one, then “Test connection”.</span>
+        </p>
+        <p className="pt-1 text-[11px] text-muted">
+          SimpleNode automates none of these steps and provides no key. Portraits must show an AI character that resembles no real
+          person, with no logo: you alone are responsible for that. A portrait&apos;s image goes through fal storage to get the URL BytePlus requires.
+        </p>
+      </div>
+    </Section>
+  );
+}
+
 const PERIODS: [number, string][] = [
-  [7, "7 jours"],
-  [30, "30 jours"],
-  [0, "Ce mois-ci"],
+  [7, "7 days"],
+  [30, "30 days"],
+  [0, "This month"],
 ];
 
 const CATEGORY_TITLES: Record<PriceRow["category"], string> = {
-  image: "Modèles d'image",
-  video: "Modèles vidéo",
-  audio: "Musique & son",
-  llm: "Texte",
-  outil: "Outils",
+  image: "Image models",
+  video: "Video models",
+  audio: "Music & sound",
+  llm: "Text",
+  outil: "Tools",
 };
 
 function CostsSection() {
@@ -240,9 +401,9 @@ function CostsSection() {
   const maxCost = Math.max(...(spend.data?.rows.map((r) => r.cost) ?? [0]), 0.000001);
 
   return (
-    <Section id="costs" icon={ReceiptText} title="Coûts" description="Tarifs de chaque modèle et dépenses réelles de votre compte fal.">
+    <Section id="costs" icon={ReceiptText} title="Costs" description="Price of each model and actual spending of your fal account.">
       <div className="flex items-center gap-2">
-        <h3 className="mr-auto text-[13px] font-medium">Dépenses par modèle</h3>
+        <h3 className="mr-auto text-[13px] font-medium">Spending by model</h3>
         {PERIODS.map(([d, label]) => (
           <button
             key={d}
@@ -252,7 +413,7 @@ function CostsSection() {
             {label}
           </button>
         ))}
-        <button className="grid h-7 w-7 place-items-center rounded-md text-muted hover:text-fg" onClick={() => loadSpend(days)} title="Actualiser">
+        <button className="grid h-7 w-7 place-items-center rounded-md text-muted hover:text-fg" onClick={() => loadSpend(days)} title="Refresh">
           <RefreshCw size={13} />
         </button>
       </div>
@@ -260,17 +421,17 @@ function CostsSection() {
       {spend.busy && <Loader2 size={14} className="mt-3 animate-spin text-muted" />}
       {spend.error && (
         <div className="mt-3 rounded-lg bg-panel-2 px-3 py-2.5 text-[12px] text-muted">
-          <span className="text-red-300">Dépenses indisponibles</span> — {spend.error}
+          <span className="text-red-300">Spending unavailable</span> — {spend.error}
         </div>
       )}
       {spend.data && (
         <>
           <div className="mt-3 flex items-baseline gap-2">
             <span className="text-[26px] font-semibold tabular-nums">{money(spend.data.total, spend.data.currency)}</span>
-            <span className="text-[12px] text-muted">depuis le {new Date(spend.data.since).toLocaleDateString("fr-FR")} · estimation fal</span>
+            <span className="text-[12px] text-muted">since {new Date(spend.data.since).toLocaleDateString("en-US")} · fal estimate</span>
           </div>
           {spend.data.rows.length === 0 ? (
-            <p className="mt-2 text-[12px] text-muted">Aucune dépense sur la période.</p>
+            <p className="mt-2 text-[12px] text-muted">No spending over the period.</p>
           ) : (
             <div className="mt-3 space-y-1.5">
               {spend.data.rows.map((r) => (
@@ -282,7 +443,7 @@ function CostsSection() {
                     </div>
                   </div>
                   <span className="text-right text-muted tabular-nums">
-                    {r.quantity.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} {unitLabel(r.unit)}
+                    {r.quantity.toLocaleString("en-US", { maximumFractionDigits: 1 })} {unitLabel(r.unit)}
                     {r.quantity > 1 ? "s" : ""}
                   </span>
                   <span className="text-right tabular-nums">{money(r.cost, spend.data!.currency)}</span>
@@ -293,14 +454,14 @@ function CostsSection() {
         </>
       )}
       <p className="mt-3 text-[12px] text-muted">
-        fal ne publie pas le solde par API. <ExternalLinkButton href={FAL_BILLING_URL}>Voir le solde et recharger</ExternalLinkButton>
+        fal doesn&apos;t publish the balance through its API. <ExternalLinkButton href={FAL_BILLING_URL}>See the balance and top up</ExternalLinkButton>
       </p>
 
       <div className="mt-6 flex items-center gap-2 border-t border-line pt-5">
-        <h3 className="mr-auto text-[13px] font-medium">Tarifs des modèles</h3>
+        <h3 className="mr-auto text-[13px] font-medium">Model prices</h3>
         <input
           className="w-44 rounded-md border border-line bg-panel-2 px-2.5 py-1 text-[12px] outline-none focus:border-accent"
-          placeholder="Filtrer"
+          placeholder="Filter"
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
         />
@@ -321,10 +482,10 @@ function CostsSection() {
                       <ProviderIcon modelId={idByLabel.get(r.label)} size={14} fallback={ReceiptText} className="text-muted" />
                       <span className="truncate">{r.label}</span>
                     </div>
-                    <span className="text-muted">{r.mode === "image" ? (cat === "video" ? "image → vidéo" : "édition") : r.mode === "texte" ? "texte →" : ""}</span>
+                    <span className="text-muted">{r.mode === "image" ? (cat === "video" ? "image → video" : "edit") : r.mode === "texte" ? "text →" : ""}</span>
                     <span className="text-right tabular-nums">
                       {r.unitPrice == null ? (
-                        <span className="text-muted">non publié</span>
+                        <span className="text-muted">not published</span>
                       ) : (
                         <>
                           {money(r.unitPrice, r.currency ?? "USD")} <span className="text-muted">/ {unitLabel(r.unit)}</span>
@@ -354,7 +515,7 @@ function StorageSection() {
     setConfirming(false);
     try {
       const freed = await invoke<MediaUsage>("clean_unused_media");
-      setMessage(freed.files ? `${freed.files} fichier${freed.files > 1 ? "s" : ""} supprimé${freed.files > 1 ? "s" : ""}, ${bytes(freed.bytes)} libérés.` : "Aucun média inutilisé.");
+      setMessage(freed.files ? `${freed.files} file${freed.files > 1 ? "s" : ""} deleted, ${bytes(freed.bytes)} freed.` : "No unused media.");
       refresh();
     } catch (err) {
       setMessage(String(err));
@@ -362,7 +523,7 @@ function StorageSection() {
   }
 
   return (
-    <Section id="storage" icon={HardDrive} title="Stockage" description="Images et vidéos importées ou générées, conservées en local.">
+    <Section id="storage" icon={HardDrive} title="Storage" description="Imported or generated images and videos, kept locally.">
       {usage && (
         <>
           <div className="flex items-baseline gap-2">
@@ -376,25 +537,25 @@ function StorageSection() {
       )}
       <div className="mt-3 flex flex-wrap gap-2">
         <button className="flex items-center gap-1.5 rounded-lg border border-line px-3 py-1.5 text-[12px]" onClick={() => invoke("reveal_media_folder")}>
-          <FolderOpen size={13} /> Ouvrir le dossier
+          <FolderOpen size={13} /> Open the folder
         </button>
         {confirming ? (
           <>
             <button className="rounded-lg bg-red-500/80 px-3 py-1.5 text-[12px] font-medium" onClick={clean}>
-              Confirmer la suppression
+              Confirm deletion
             </button>
             <button className="rounded-lg px-3 py-1.5 text-[12px] text-muted" onClick={() => setConfirming(false)}>
-              Annuler
+              Cancel
             </button>
           </>
         ) : (
           <button className="rounded-lg border border-line px-3 py-1.5 text-[12px]" onClick={() => setConfirming(true)}>
-            Supprimer les médias inutilisés
+            Delete unused media
           </button>
         )}
       </div>
       <p className="mt-2 text-[12px] text-muted">
-        Supprime les fichiers qui ne figurent dans aucun projet, corbeille comprise. Cette action est définitive.
+        Deletes the files that appear in no project, trash included. This can&apos;t be undone.
       </p>
       {message && <p className="mt-2 text-[12px] text-fg">{message}</p>}
     </Section>
@@ -407,19 +568,19 @@ function AboutSection() {
     getVersion().then(setVersion).catch(() => {});
   }, []);
   return (
-    <Section id="about" icon={Info} title="À propos" description="SimpleNode — canvas à nœuds pour la génération IA.">
+    <Section id="about" icon={Info} title="About" description="SimpleNode — node-based canvas for AI generation.">
       <dl className="grid grid-cols-[140px_1fr] gap-y-1.5 text-[12px]">
         <dt className="text-muted">Version</dt>
         <dd>{version}</dd>
-        <dt className="text-muted">Modèles</dt>
-        <dd>Exécutés via fal.ai</dd>
+        <dt className="text-muted">Models</dt>
+        <dd>Run through fal.ai, and BytePlus ModelArk (optional)</dd>
         <dt className="text-muted">Logos</dt>
         <dd>
-          <ExternalLinkButton href="https://github.com/lobehub/lobe-icons">@lobehub/icons</ExternalLinkButton> (MIT) — marques de leurs propriétaires respectifs
+          <ExternalLinkButton href="https://github.com/lobehub/lobe-icons">@lobehub/icons</ExternalLinkButton> (MIT) — trademarks of their respective owners
         </dd>
       </dl>
       <p className="mt-4 border-t border-line pt-3 text-[11px] text-muted">
-        © {new Date().getFullYear()} LUDACOM SARL. SimpleNode by Ludacom. Tous droits réservés.
+        © {new Date().getFullYear()} LUDACOM SARL. SimpleNode by Ludacom. All rights reserved.
         <span className="mt-1 flex items-center gap-1">
           Made with <Heart size={11} className="fill-[#ff4d6d] text-[#ff4d6d]" aria-label="love" /> Paris
         </span>
@@ -472,14 +633,14 @@ function McpSection() {
       id="mcp"
       icon={Bot}
       title="MCP"
-      description="Laissez Claude Code piloter SimpleNode : créer des projets, ajouter et relier des nœuds, lancer des générations et récupérer les résultats."
+      description="Let Claude Code drive SimpleNode: create projects, add and connect nodes, launch generations and get the results."
     >
       <div className="space-y-4 text-[12px]">
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={status.enabled} onChange={(e) => configure({ enabled: e.target.checked })} />
-          Activer le serveur MCP
+          Enable the MCP server
           <span className={`ml-auto text-[11px] ${status.running ? "text-emerald-400" : "text-muted"}`}>
-            {status.running ? `En écoute sur 127.0.0.1:${status.port}` : "Arrêté"}
+            {status.running ? `Listening on 127.0.0.1:${status.port}` : "Stopped"}
           </span>
         </label>
         {(error || status.error) && <p className="rounded-md bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">{error || status.error}</p>}
@@ -489,7 +650,7 @@ function McpSection() {
             {(
               [
                 ["code", "Claude Code"],
-                ["desktop", "Claude (app de bureau)"],
+                ["desktop", "Claude (desktop app)"],
               ] as const
             ).map(([id, label]) => (
               <button
@@ -502,11 +663,11 @@ function McpSection() {
             ))}
           </div>
           {client === "code" ? (
-            <p className="text-muted">Dans un Terminal, une seule fois :</p>
+            <p className="text-muted">In a Terminal, once:</p>
           ) : (
             <p className="text-muted">
-              Dans Claude : Réglages → Développeur → Modifier la config. Ajoutez ce bloc dans <code>claude_desktop_config.json</code> (dans
-              « mcpServers » s&apos;il existe déjà), puis quittez et relancez Claude. Demande Node.js (npx).
+              In Claude: Settings → Developer → Edit config. Add this block to <code>claude_desktop_config.json</code> (inside
+              &quot;mcpServers&quot; if it already exists), then quit and relaunch Claude. Requires Node.js (npx).
             </p>
           )}
           <div className="flex items-start gap-2">
@@ -523,16 +684,16 @@ function McpSection() {
                   });
                 }}
               >
-                {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copié" : "Copier"}
+                {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copied" : "Copy"}
               </button>
               <button className="flex items-center gap-1 rounded-md px-2 py-1 text-muted hover:text-fg" onClick={() => setShown(!shown)}>
-                {shown ? <EyeOff size={12} /> : <Eye size={12} />} {shown ? "Masquer" : "Afficher"}
+                {shown ? <EyeOff size={12} /> : <Eye size={12} />} {shown ? "Hide" : "Show"}
               </button>
             </div>
           </div>
           <p className="text-[11px] text-muted">
-            « Ajouter un connecteur personnalisé » dans Claude ne convient pas : ces connecteurs passent par les serveurs d&apos;Anthropic et ne
-            peuvent pas joindre une app sur votre Mac. SimpleNode doit être ouvert pendant que Claude s&apos;en sert. Le jeton donne le contrôle de l&apos;app : ne le partagez pas.{" "}
+            &quot;Add custom connector&quot; in Claude won&apos;t work: those connectors go through Anthropic&apos;s servers and
+            can&apos;t reach an app on your Mac. SimpleNode must be open while Claude uses it. The token gives control of the app: don&apos;t share it.{" "}
             <button
               className="text-accent hover:underline"
               onClick={() =>
@@ -541,15 +702,15 @@ function McpSection() {
                   .catch((e) => setError(String(e)))
               }
             >
-              Changer de jeton
+              Change token
             </button>{" "}
-            (il faudra relancer la commande).
+            (you&apos;ll need to run the command again).
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line pt-3">
           <label className="flex items-center gap-2">
-            Plafond de dépenses par session ($)
+            Spending cap per session ($)
             <input
               type="number"
               min={0}
@@ -580,13 +741,13 @@ function McpSection() {
           </label>
         </div>
         <p className="text-[11px] text-muted">
-          Lancé par Claude Code depuis l&apos;ouverture de l&apos;app (estimation) : <span className="text-fg tabular-nums">${spent.toFixed(2)}</span> sur $
+          Launched by Claude Code since the app opened (estimate): <span className="text-fg tabular-nums">${spent.toFixed(2)}</span> of $
           {status.budget.toFixed(2)}.{" "}
           <button className="text-accent hover:underline" onClick={reset}>
-            Remettre à zéro
+            Reset
           </button>
-          . Au-delà du plafond, l&apos;app refuse de lancer et Claude Code doit vous demander. Une génération dont le coût ne peut pas être estimé est
-          toujours refusée.
+          . Beyond the cap, the app refuses to launch and Claude Code must ask you. A generation whose cost can&apos;t be estimated is
+          always refused.
         </p>
       </div>
     </Section>
@@ -595,24 +756,25 @@ function McpSection() {
 
 function CoffeeSection() {
   return (
-    <Section id="coffee" icon={Coffee} title="Buy me a coffee" description="SimpleNode est gratuit. Si l'app vous rend service, vous pouvez soutenir son développement.">
+    <Section id="coffee" icon={Coffee} title="Buy me a coffee" description="SimpleNode is free. If the app helps you, you can support its development.">
       <button
         onClick={() => openUrl("https://buymeacoffee.com/heako")}
         className="inline-flex items-center gap-2 rounded-lg bg-[#ffdd00] px-4 py-2 text-[13px] font-medium text-black hover:brightness-95"
       >
-        <Coffee size={15} /> Offrir un café <ExternalLink size={12} />
+        <Coffee size={15} /> Buy a coffee <ExternalLink size={12} />
       </button>
-      <p className="mt-2 text-[11px] text-muted">Ouvre buymeacoffee.com/heako dans votre navigateur.</p>
+      <p className="mt-2 text-[11px] text-muted">Opens buymeacoffee.com/heako in your browser.</p>
     </Section>
   );
 }
 
 const SECTIONS: [string, string][] = [
-  ["keys", "Clé API"],
-  ["costs", "Coûts"],
-  ["storage", "Stockage"],
+  ["keys", "API key"],
+  ["byteplus", "BytePlus"],
+  ["costs", "Costs"],
+  ["storage", "Storage"],
   ["mcp", "MCP"],
-  ["about", "À propos"],
+  ["about", "About"],
   ["coffee", "Buy me a coffee"],
 ];
 
@@ -628,6 +790,7 @@ export default function Settings() {
       </nav>
       <div className="space-y-6 pb-16">
         <KeysSection />
+        <BytePlusSection />
         <CostsSection />
         <StorageSection />
         <McpSection />

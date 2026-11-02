@@ -165,8 +165,8 @@ pub static MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("aspect_ratio", "Format", ASPECT_NANO, "1:1"),
-            select("resolution", "Résolution", &["1K", "2K", "4K"], "1K"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_NANO, "1:1"),
+            select("resolution", "Resolution", &["1K", "2K", "4K"], "1K"),
         ],
     },
     ModelDef {
@@ -183,12 +183,12 @@ pub static MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[
-            media("video_url", "Vidéo de référence", MediaKind::Video, false, Mode::Edit),
-            media("audio_url", "Audio de référence", MediaKind::Audio, false, Mode::Edit),
+            media("video_url", "Reference video", MediaKind::Video, false, Mode::Edit),
+            media("audio_url", "Reference audio", MediaKind::Audio, false, Mode::Edit),
         ],
         params: &[
-            select("aspect_ratio", "Format", ASPECT_NANO, "1:1"),
-            select("resolution", "Résolution", &["0.5K", "1K", "2K", "4K"], "1K"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_NANO, "1:1"),
+            select("resolution", "Resolution", &["0.5K", "1K", "2K", "4K"], "1K"),
         ],
     },
     ModelDef {
@@ -205,7 +205,7 @@ pub static MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("image_size", "Taille", SIZE_SEEDREAM_5, "auto_2K")],
+        params: &[select("image_size", "Size", SIZE_SEEDREAM_5, "auto_2K")],
     },
     ModelDef {
         id: "seedream-4.5",
@@ -221,7 +221,7 @@ pub static MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("image_size", "Taille", SIZE_SEEDREAM_45, "auto_2K")],
+        params: &[select("image_size", "Size", SIZE_SEEDREAM_45, "auto_2K")],
     },
     ModelDef {
         id: "gpt-image-2",
@@ -236,10 +236,10 @@ pub static MODELS: &[ModelDef] = &[
         draft: false,
         negative: false,
         refs_label: None,
-        media: &[media("mask_url", "Masque", MediaKind::Image, false, Mode::Edit)],
+        media: &[media("mask_url", "Mask", MediaKind::Image, false, Mode::Edit)],
         params: &[
-            select("image_size", "Taille", SIZE_GPT, "auto"),
-            select("quality", "Qualité", &["auto", "low", "medium", "high"], "auto"),
+            select("image_size", "Size", SIZE_GPT, "auto"),
+            select("quality", "Quality", &["auto", "low", "medium", "high"], "auto"),
         ],
     },
     ModelDef {
@@ -256,7 +256,7 @@ pub static MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("image_size", "Taille", SIZE_STD, "square_hd")],
+        params: &[select("image_size", "Size", SIZE_STD, "square_hd")],
     },
     ModelDef {
         id: "flux-kontext-pro",
@@ -272,7 +272,7 @@ pub static MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("aspect_ratio", "Format", ASPECT_KONTEXT, "1:1")],
+        params: &[select("aspect_ratio", "Aspect ratio", ASPECT_KONTEXT, "1:1")],
     },
     ModelDef {
         // Replaces Qwen Image Max, deprecated by fal (projects are migrated on opening).
@@ -289,7 +289,7 @@ pub static MODELS: &[ModelDef] = &[
         negative: true,
         refs_label: None,
         media: &[],
-        params: &[select("image_size", "Taille", SIZE_STD, "square_hd")],
+        params: &[select("image_size", "Size", SIZE_STD, "square_hd")],
     },
     ModelDef {
         id: "recraft-v4-pro",
@@ -305,7 +305,7 @@ pub static MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("image_size", "Taille", SIZE_STD, "square_hd")],
+        params: &[select("image_size", "Size", SIZE_STD, "square_hd")],
     },
     ModelDef {
         id: "ideogram-v3",
@@ -319,9 +319,9 @@ pub static MODELS: &[ModelDef] = &[
         end_field: None,
         draft: false,
         negative: true,
-        refs_label: Some("Image à remixer"),
-        media: &[media("image_urls", "Images de style", MediaKind::Image, true, Mode::Both)],
-        params: &[select("image_size", "Taille", SIZE_STD, "square_hd")],
+        refs_label: Some("Image to remix"),
+        media: &[media("image_urls", "Style images", MediaKind::Image, true, Mode::Both)],
+        params: &[select("image_size", "Size", SIZE_STD, "square_hd")],
     },
     ModelDef {
         id: "flux-schnell",
@@ -337,7 +337,7 @@ pub static MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("image_size", "Taille", SIZE_STD, "square_hd")],
+        params: &[select("image_size", "Size", SIZE_STD, "square_hd")],
     },
     ModelDef {
         id: "llm",
@@ -353,7 +353,7 @@ pub static MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("model", "Modèle", LLM_MODELS, "google/gemini-2.5-flash")],
+        params: &[select("model", "Model", LLM_MODELS, "google/gemini-2.5-flash")],
     },
 ];
 
@@ -378,11 +378,11 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         draft: false,
         negative: false,
         refs_label: None,
-        media: &[media("middle_image_urls", "Images intermédiaires", MediaKind::Image, true, Mode::Edit)],
+        media: &[media("middle_image_urls", "Middle images", MediaKind::Image, true, Mode::Edit)],
         params: &[
-            int("duration", "Durée (s)", &["3", "5", "8", "10", "15", "20", "25", "30"], "5"),
-            select("aspect_ratio", "Format", &["16:9", "9:16", "1:1", "21:9"], "16:9").text_only(),
-            select("resolution", "Résolution", &["720p", "1080p"], "1080p"),
+            int("duration", "Duration (s)", &["3", "5", "8", "10", "15", "20", "25", "30"], "5"),
+            select("aspect_ratio", "Aspect ratio", &["16:9", "9:16", "1:1", "21:9"], "16:9").text_only(),
+            select("resolution", "Resolution", &["720p", "1080p"], "1080p"),
         ],
     },
     ModelDef {
@@ -398,11 +398,11 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         draft: false,
         negative: false,
         refs_label: None,
-        media: &[media("target_audio_url", "Audio cible", MediaKind::Audio, false, Mode::Both)],
+        media: &[media("target_audio_url", "Target audio", MediaKind::Audio, false, Mode::Both)],
         params: &[
-            int("duration", "Durée (s)", &["5", "6", "8", "10", "12", "15"], "5"),
-            select("aspect_ratio", "Format", ASPECT_SEEDANCE, "16:9").text_only(),
-            select("resolution", "Résolution", &["480P", "768P", "2K", "4K"], "2K"),
+            int("duration", "Duration (s)", &["5", "6", "8", "10", "12", "15"], "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE, "16:9").text_only(),
+            select("resolution", "Resolution", &["480P", "768P", "2K", "4K"], "2K"),
         ],
     },
     ModelDef {
@@ -418,13 +418,13 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         draft: false,
         negative: false,
         refs_label: None,
-        media: &[media("target_audio_url", "Audio cible", MediaKind::Audio, false, Mode::Both)],
+        media: &[media("target_audio_url", "Target audio", MediaKind::Audio, false, Mode::Both)],
         params: &[
-            int("duration", "Durée (s)", &["2", "3", "5", "6", "8", "10", "12", "15"], "5"),
-            select("aspect_ratio", "Format", ASPECT_SEEDANCE, "16:9").text_only(),
-            select("resolution", "Résolution", &["480P", "768P", "1080P"], "768P"),
+            int("duration", "Duration (s)", &["2", "3", "5", "6", "8", "10", "12", "15"], "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE, "16:9").text_only(),
+            select("resolution", "Resolution", &["480P", "768P", "1080P"], "768P"),
             // Required by the schema; "balanced" is fal's documented default.
-            select("prompt_expansion_mode", "Réécriture du prompt", &["balanced"], "balanced"),
+            select("prompt_expansion_mode", "Prompt rewriting", &["balanced"], "balanced"),
         ],
     },
     ModelDef {
@@ -442,9 +442,9 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("duration", "Durée (s)", SECONDS_SEEDANCE_25, "5"),
-            select("aspect_ratio", "Format", ASPECT_SEEDANCE_25, "auto").text_only(),
-            select("resolution", "Résolution", &["480p", "720p", "1080p"], "720p"),
+            select("duration", "Duration (s)", SECONDS_SEEDANCE_25, "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE_25, "auto").text_only(),
+            select("resolution", "Resolution", &["480p", "720p", "1080p"], "720p"),
             toggle("generate_audio", "Audio", "true"),
         ],
     },
@@ -464,8 +464,8 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         media: &[],
         // No resolution: draft mode always renders 480p.
         params: &[
-            select("duration", "Durée (s)", SECONDS_SEEDANCE_25, "5"),
-            select("aspect_ratio", "Format", ASPECT_SEEDANCE_25, "auto").text_only(),
+            select("duration", "Duration (s)", SECONDS_SEEDANCE_25, "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE_25, "auto").text_only(),
             toggle("generate_audio", "Audio", "true"),
         ],
     },
@@ -484,8 +484,8 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("duration", "Durée (s)", SECONDS_3_15, "5"),
-            select("aspect_ratio", "Format", ASPECT_VIDEO, "16:9").text_only(),
+            select("duration", "Duration (s)", SECONDS_3_15, "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_VIDEO, "16:9").text_only(),
             toggle("generate_audio", "Audio", "false"),
         ],
     },
@@ -504,8 +504,8 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("duration", "Durée (s)", &["5", "10"], "5"),
-            select("aspect_ratio", "Format", ASPECT_VIDEO, "16:9").text_only(),
+            select("duration", "Duration (s)", &["5", "10"], "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_VIDEO, "16:9").text_only(),
         ],
     },
     ModelDef {
@@ -523,9 +523,9 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("duration", "Durée", &["4s", "6s", "8s"], "8s"),
-            select("aspect_ratio", "Format", &["16:9", "9:16"], "16:9"),
-            select("resolution", "Résolution", &["720p", "1080p", "4k"], "720p"),
+            select("duration", "Duration", &["4s", "6s", "8s"], "8s"),
+            select("aspect_ratio", "Aspect ratio", &["16:9", "9:16"], "16:9"),
+            select("resolution", "Resolution", &["720p", "1080p", "4k"], "720p"),
             toggle("generate_audio", "Audio", "true"),
         ],
     },
@@ -544,9 +544,9 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("duration", "Durée", &["4s", "6s", "8s"], "8s"),
-            select("aspect_ratio", "Format", &["16:9", "9:16"], "16:9"),
-            select("resolution", "Résolution", &["720p", "1080p", "4k"], "720p"),
+            select("duration", "Duration", &["4s", "6s", "8s"], "8s"),
+            select("aspect_ratio", "Aspect ratio", &["16:9", "9:16"], "16:9"),
+            select("resolution", "Resolution", &["720p", "1080p", "4k"], "720p"),
             toggle("generate_audio", "Audio", "true"),
         ],
     },
@@ -565,9 +565,9 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("duration", "Durée (s)", &["auto", "4", "5", "6", "8", "10", "12", "15"], "5"),
-            select("aspect_ratio", "Format", &["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "auto"),
-            select("resolution", "Résolution", &["480p", "720p", "1080p", "4k"], "720p"),
+            select("duration", "Duration (s)", &["auto", "4", "5", "6", "8", "10", "12", "15"], "5"),
+            select("aspect_ratio", "Aspect ratio", &["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"], "auto"),
+            select("resolution", "Resolution", &["480p", "720p", "1080p", "4k"], "720p"),
             toggle("generate_audio", "Audio", "true"),
         ],
     },
@@ -586,9 +586,9 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("duration", "Durée (s)", &["3", "5", "8", "10", "12"], "5"),
-            select("aspect_ratio", "Format", ASPECT_SEEDANCE, "16:9"),
-            select("resolution", "Résolution", &["480p", "720p", "1080p"], "1080p"),
+            select("duration", "Duration (s)", &["3", "5", "8", "10", "12"], "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE, "16:9"),
+            select("resolution", "Resolution", &["480p", "720p", "1080p"], "1080p"),
         ],
     },
     ModelDef {
@@ -605,7 +605,7 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("duration", "Durée (s)", &["6", "10"], "6")],
+        params: &[select("duration", "Duration (s)", &["6", "10"], "6")],
     },
     ModelDef {
         id: "wan-2.5",
@@ -622,9 +622,9 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[media("audio_url", "Audio", MediaKind::Audio, false, Mode::Both)],
         params: &[
-            select("duration", "Durée (s)", &["5", "10"], "5"),
-            select("resolution", "Résolution", &["480p", "720p", "1080p"], "1080p"),
-            select("aspect_ratio", "Format", ASPECT_VIDEO, "16:9").text_only(),
+            select("duration", "Duration (s)", &["5", "10"], "5"),
+            select("resolution", "Resolution", &["480p", "720p", "1080p"], "1080p"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_VIDEO, "16:9").text_only(),
         ],
     },
     ModelDef {
@@ -643,9 +643,9 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            int("duration", "Durée (s)", &["6", "8", "10"], "6"),
-            select("resolution", "Résolution", &["1080p", "1440p", "2160p"], "1080p"),
-            select("aspect_ratio", "Format", &["16:9", "9:16"], "16:9").text_only(),
+            int("duration", "Duration (s)", &["6", "8", "10"], "6"),
+            select("resolution", "Resolution", &["1080p", "1440p", "2160p"], "1080p"),
+            select("aspect_ratio", "Aspect ratio", &["16:9", "9:16"], "16:9").text_only(),
             toggle("generate_audio", "Audio", "true"),
         ],
     },
@@ -670,8 +670,8 @@ pub static RECAST_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("resolution", "Résolution", &["768P", "1080P"], "1080P"),
-            toggle("enhance_realism", "Réalisme renforcé", "false"),
+            select("resolution", "Resolution", &["768P", "1080P"], "1080P"),
+            toggle("enhance_realism", "Enhanced realism", "false"),
         ],
     },
     ModelDef {
@@ -688,7 +688,7 @@ pub static RECAST_MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[select("resolution", "Résolution", &["480p", "580p", "720p"], "720p")],
+        params: &[select("resolution", "Resolution", &["480p", "580p", "720p"], "720p")],
     },
     ModelDef {
         id: "kling-3-pro-motion",
@@ -706,8 +706,8 @@ pub static RECAST_MODELS: &[ModelDef] = &[
         media: &[],
         params: &[
             // "video": framing follows the source (up to 30 s); "image": the character's (up to 10 s).
-            select("character_orientation", "Cadrage", &["video", "image"], "video"),
-            toggle("keep_original_sound", "Son d'origine", "true"),
+            select("character_orientation", "Framing", &["video", "image"], "video"),
+            toggle("keep_original_sound", "Original sound", "true"),
         ],
     },
     ModelDef {
@@ -725,8 +725,8 @@ pub static RECAST_MODELS: &[ModelDef] = &[
         refs_label: None,
         media: &[],
         params: &[
-            select("character_orientation", "Cadrage", &["video", "image"], "video"),
-            toggle("keep_original_sound", "Son d'origine", "true"),
+            select("character_orientation", "Framing", &["video", "image"], "video"),
+            toggle("keep_original_sound", "Original sound", "true"),
         ],
     },
 ];
@@ -764,7 +764,7 @@ pub static AUDIO_MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[int("seconds_total", "Durée (s)", &["10", "30", "60", "120", "190"], "30")],
+        params: &[int("seconds_total", "Duration (s)", &["10", "30", "60", "120", "190"], "30")],
     },
     ModelDef {
         id: "elevenlabs-sfx-v2",
@@ -780,11 +780,11 @@ pub static AUDIO_MODELS: &[ModelDef] = &[
         negative: false,
         refs_label: None,
         media: &[],
-        params: &[toggle("loop", "En boucle", "false")],
+        params: &[toggle("loop", "Loop", "false")],
     },
     ModelDef {
         id: "mmaudio-v2-text",
-        label: "MMAudio (bruitages)",
+        label: "MMAudio (sound effects)",
         provider: "MMAudio",
         category: Category::Audio,
         text_endpoint: Some("fal-ai/mmaudio-v2/text-to-audio"),
@@ -796,11 +796,11 @@ pub static AUDIO_MODELS: &[ModelDef] = &[
         negative: true,
         refs_label: None,
         media: &[],
-        params: &[int("duration", "Durée (s)", &["4", "8", "15", "30"], "8")],
+        params: &[int("duration", "Duration (s)", &["4", "8", "15", "30"], "8")],
     },
     ModelDef {
         id: "mmaudio-v2-video",
-        label: "MMAudio (son d'une vidéo)",
+        label: "MMAudio (video to sound)",
         provider: "MMAudio",
         category: Category::Video,
         text_endpoint: Some("fal-ai/mmaudio-v2"),
@@ -811,8 +811,8 @@ pub static AUDIO_MODELS: &[ModelDef] = &[
         draft: false,
         negative: true,
         refs_label: None,
-        media: &[media("video_url", "Vidéo", MediaKind::Video, false, Mode::Both)],
-        params: &[int("duration", "Durée (s)", &["4", "8", "15", "30"], "8")],
+        media: &[media("video_url", "Video", MediaKind::Video, false, Mode::Both)],
+        params: &[int("duration", "Duration (s)", &["4", "8", "15", "30"], "8")],
     },
 ];
 

@@ -43,7 +43,7 @@ fn projects_dir(app: &AppHandle) -> Result<PathBuf> {
 fn project_path(app: &AppHandle, id: &str) -> Result<PathBuf> {
     let valid = !id.is_empty() && id.len() <= 64 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if !valid {
-        return Err(AppError::Invalid(format!("Identifiant de projet invalide : {id}")));
+        return Err(AppError::Invalid(format!("Invalid project id: {id}")));
     }
     Ok(projects_dir(app)?.join(format!("{id}.json")))
 }
@@ -70,7 +70,7 @@ pub fn list(app: &AppHandle) -> Result<Vec<ProjectMeta>> {
 
 pub fn load(app: &AppHandle, id: &str) -> Result<Project> {
     let bytes = std::fs::read(project_path(app, id)?)?;
-    serde_json::from_slice(&bytes).map_err(|e| AppError::Invalid(format!("Projet illisible : {e}")))
+    serde_json::from_slice(&bytes).map_err(|e| AppError::Invalid(format!("Unreadable project: {e}")))
 }
 
 /// Writes to a temp file then renames, so a crash never leaves a half-written project.

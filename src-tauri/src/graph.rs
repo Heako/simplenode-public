@@ -13,6 +13,7 @@ use futures::stream::{FuturesUnordered, StreamExt};
 use tokio::sync::watch;
 
 use crate::angles;
+use crate::byteplus::{self, BytePlus};
 use crate::error::{AppError, Result};
 use crate::fal::{Fal, ModelCall};
 use crate::models::{self, Category, MediaKind};
@@ -86,11 +87,30 @@ struct NodeEvent<'a> {
     outputs: Option<&'a Ports>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<String>,
+    /// Set on an error raised before any provider billed a generation, so a
+    /// cost counted against the MCP budget can be given back.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unbilled: bool,
 }
 
-/// Nodes that call fal (and cost money) are not re-run when their output is cached.
+/// Nodes that call fal or BytePlus (and cost money) are not re-run when their output is cached.
 fn is_remote(kind: &str) -> bool {
-    matches!(kind, "model" | "enhancer" | "describer" | "videoDescriber" | "angles" | "recast" | "addAudio")
+    matches!(
+        kind,
+        "model" | "enhancer" | "describer" | "videoDescriber" | "angles" | "recast" | "addAudio" | "bpPortrait" | "bpSeedance" | "bpSeedream"
+    )
+}
+
+/// Several connected prompts are joined; the inline field is the fallback.
+fn prompt_text(node: &GraphNode, inputs: &Inputs) -> String {
+    match inputs.get("prompt").filter(|v| !v.is_empty()) {
+        Some(texts) => texts.join("\n\n"),
+        None => param(node, "prompt").to_owned(),
+    }
+}
+
+fn unix_ms() -> String {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis().to_string()
 }
 
 /// Upstream node ids of `id`, including `id` itself.
@@ -149,13 +169,13 @@ fn text_or_param(node: &GraphNode, inputs: &Inputs, input: &str, param_key: &str
         None => param(node, param_key).to_owned(),
     };
     if text.trim().is_empty() {
-        return Err(AppError::Invalid("Texte d'entrée manquant".into()));
+        return Err(AppError::Invalid("Missing input text".into()));
     }
     Ok(text)
 }
 
 fn require<'a>(inputs: &'a Inputs, key: &str, what: &str) -> Result<&'a str> {
-    first(inputs, key).ok_or_else(|| AppError::Invalid(format!("Reliez {what}")))
+    first(inputs, key).ok_or_else(|| AppError::Invalid(format!("Connect {what}")))
 }
 
 const ENHANCER_SYSTEM: &str = "You rewrite prompts for image generation models. Expand the user's idea into one rich, \
@@ -165,7 +185,7 @@ user's language.";
 
 const DESCRIBER_SYSTEM: &str = "You describe images so they can be recreated by an image generation model. Cover subject, \
 composition, framing, lighting, colors, materials, style and mood. Answer with the description only, no preamble, in \
-French.";
+English.";
 
 /// Names declared on a Prompt node, comma-separated in `params.vars`.
 fn declared_vars(node: &GraphNode) -> Vec<&str> {
@@ -219,7 +239,7 @@ pub fn crop_spec(params: &Ports) -> Result<CropSpec> {
     match param("aspect") {
         "" | "free" => Ok(CropSpec::Percent { x: num("x", 0.0), y: num("y", 0.0), w: num("w", 100.0), h: num("h", 100.0) }),
         ratio => {
-            let (a, b) = ratio.split_once(':').ok_or_else(|| AppError::Invalid(format!("Format invalide : {ratio}")))?;
+            let (a, b) = ratio.split_once(':').ok_or_else(|| AppError::Invalid(format!("Invalid ratio: {ratio}")))?;
             let (a, b): (f64, f64) = (a.parse().unwrap_or(1.0), b.parse().unwrap_or(1.0));
             Ok(CropSpec::Aspect(a / b))
         }
@@ -236,7 +256,7 @@ async fn assemble(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Gra
     }
     // Shown while the merge runs, and kept if it fails.
     let partial = Ports::from([("pieces".to_owned(), recast::encode_pieces(pieces))]);
-    app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&partial), error: None })?;
+    app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&partial), error: None, unbilled: false })?;
     let uploads = pieces.iter().map(|p| async { fal.upload(&storage::owned_path(app, &p.video)?).await });
     let urls = try_join_all(uploads).await?;
     let url = fal.merge_videos(&urls).await?;
@@ -259,7 +279,7 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
         "image" => {
             let path = param(node, "path");
             if path.is_empty() {
-                return Err(AppError::Invalid("Aucun fichier importé".into()));
+                return Err(AppError::Invalid("No file imported".into()));
             }
             let port = if param(node, "media") == "video" { "video" } else { "image" };
             out.insert(port.into(), path.to_owned());
@@ -280,25 +300,25 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             out.insert("text".into(), text);
         }
         "crop" => {
-            let source = require(inputs, "image", "une image")?;
+            let source = require(inputs, "image", "an image")?;
             let path = storage::crop(app, source, &crop_spec(&node.params)?)?;
             out.insert("image".into(), path.to_string_lossy().into_owned());
         }
         "angles" => {
-            let reference = storage::to_model_input(app, require(inputs, "image", "une image de référence")?)?;
+            let reference = storage::to_model_input(app, require(inputs, "image", "a reference image")?)?;
             let context = first(inputs, "context").unwrap_or_default();
             let def = models::find(param(node, "modelId"))
                 .filter(|m| m.category == Category::Image && m.edit_endpoint.is_some())
-                .ok_or_else(|| AppError::Invalid("Choisissez un modèle d'image qui accepte une référence".into()))?;
-            let (cols, rows) = angles::layout(param(node, "layout")).ok_or_else(|| AppError::Invalid("Disposition inconnue".into()))?;
+                .ok_or_else(|| AppError::Invalid("Choose an image model that takes a reference".into()))?;
+            let (cols, rows) = angles::layout(param(node, "layout")).ok_or_else(|| AppError::Invalid("Unknown layout".into()))?;
             let ids: Vec<String> = serde_json::from_str(param(node, "shots")).unwrap_or_default();
             let shots = ids
                 .iter()
                 .take((cols * rows) as usize)
-                .map(|id| angles::shot(id).ok_or_else(|| AppError::Invalid(format!("Plan inconnu : {id}"))))
+                .map(|id| angles::shot(id).ok_or_else(|| AppError::Invalid(format!("Unknown shot: {id}"))))
                 .collect::<Result<Vec<_>>>()?;
             if shots.len() != (cols * rows) as usize {
-                return Err(AppError::Invalid(format!("Choisissez {} plans", cols * rows)));
+                return Err(AppError::Invalid(format!("Choose {} shots", cols * rows)));
             }
             let panel = match param(node, "panel") {
                 "1:1" => 1.0,
@@ -345,27 +365,27 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             }
         }
         "gridCrop" => {
-            let source = require(inputs, "image", "une image")?;
+            let source = require(inputs, "image", "an image")?;
             let num = |k: &str| param(node, k).parse::<u32>().unwrap_or(2);
             let inset = param(node, "inset").parse::<f64>().unwrap_or(0.0);
             let tiles = storage::grid_crop(app, source, num("rows"), num("cols"), inset)?;
             let views: Vec<View> = tiles
                 .iter()
                 .enumerate()
-                .map(|(i, path)| View { path: path.to_string_lossy().into_owned(), label: format!("Vue {}", i + 1) })
+                .map(|(i, path)| View { path: path.to_string_lossy().into_owned(), label: format!("View {}", i + 1) })
                 .collect();
             out.insert("views".into(), storage::encode_views(&views));
         }
         "anglePick" => {
-            let views = storage::decode_views(require(inputs, "views", "un ensemble de plans")?)?;
+            let views = storage::decode_views(require(inputs, "views", "a set of shots")?)?;
             let index: usize = param(node, "selected").parse().unwrap_or(0);
-            let view = views.get(index).or(views.first()).ok_or_else(|| AppError::Invalid("Aucun plan reçu".into()))?;
+            let view = views.get(index).or(views.first()).ok_or_else(|| AppError::Invalid("No shot received".into()))?;
             out.insert("image".into(), view.path.clone());
         }
         "angleExport" => {
-            let views = storage::decode_views(require(inputs, "views", "un ensemble de plans")?)?;
+            let views = storage::decode_views(require(inputs, "views", "a set of shots")?)?;
             let count = storage::export_views(app, &views, param(node, "folder"))?;
-            out.insert("summary".into(), format!("{count} fichiers exportés"));
+            out.insert("summary".into(), format!("{count} files exported"));
         }
         "enhancer" => {
             let prompt = text_or_param(node, inputs, "text", "text")?;
@@ -374,12 +394,12 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             out.insert("text".into(), text);
         }
         "describer" => {
-            let image = storage::to_model_input(app, require(inputs, "image", "une image")?)?;
+            let image = storage::to_model_input(app, require(inputs, "image", "an image")?)?;
             let def = models::find("llm").expect("llm model is registered");
             let ask = if param(node, "detail") == "short" {
-                "Décris cette image en une ou deux phrases."
+                "Describe this image in one or two sentences."
             } else {
-                "Décris cette image en détail."
+                "Describe this image in detail."
             };
             let text = fal.run_model(def, &llm_params(node), ModelCall { system: DESCRIBER_SYSTEM, refs: std::slice::from_ref(&image), ..ModelCall::new(ask) })
                 .await?
@@ -387,10 +407,10 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             out.insert("text".into(), text);
         }
         "videoDescriber" => {
-            let video = storage::owned_path(app, require(inputs, "video", "une vidéo")?)?;
+            let video = storage::owned_path(app, require(inputs, "video", "a video")?)?;
             let url = fal.upload(&video).await?;
             let question = match param(node, "question").trim() {
-                "" => "Décris cette vidéo : sujets, actions, mouvements de caméra, lumière, style et ambiance. Réponds en français.",
+                "" => "Describe this video: subjects, actions, camera moves, lighting, style and mood.",
                 q => q,
             };
             let text = fal.describe_video(&url, question, param(node, "detailed") == "true").await?;
@@ -398,15 +418,15 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
         }
         "recast" => {
             let def = recast::model(param(node, "mode"), param(node, "modelId"))
-                .ok_or_else(|| AppError::Invalid("Choisissez un modèle de ce mode".into()))?;
+                .ok_or_else(|| AppError::Invalid("Choose a model of this mode".into()))?;
             let characters = inputs.get("characters").map(Vec::as_slice).unwrap_or_default();
             if characters.is_empty() {
-                return Err(AppError::Invalid("Reliez au moins une image de personnage".into()));
+                return Err(AppError::Invalid("Connect at least one character image".into()));
             }
             // Refused rather than silently dropped: the extra person would just be missing.
             if characters.len() > def.max_refs as usize {
-                let most = if def.max_refs == 1 { "un seul personnage".to_owned() } else { format!("{} personnages au plus", def.max_refs) };
-                return Err(AppError::Invalid(format!("{} accepte {most}", def.label)));
+                let most = if def.max_refs == 1 { "a single character".to_owned() } else { format!("{} characters at most", def.max_refs) };
+                return Err(AppError::Invalid(format!("{} takes {most}", def.label)));
             }
             let refs = characters.iter().map(|c| storage::to_model_input(app, c)).collect::<Result<Vec<_>>>()?;
             // Optional here: who becomes whom, what to keep or change.
@@ -431,7 +451,7 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                 let pieces = recast::decode_pieces(node.outputs.get("pieces").map(String::as_str).unwrap_or_default())?;
                 let video = assemble(app, fal, http, node, &pieces)
                     .await?
-                    .ok_or_else(|| AppError::Invalid("Refaites d'abord les segments en erreur".into()))?;
+                    .ok_or_else(|| AppError::Invalid("Redo the failed segments first".into()))?;
                 out.insert("pieces".into(), recast::encode_pieces(&pieces));
                 out.insert("video".into(), video);
                 return Ok(out);
@@ -440,7 +460,7 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             // Redo one segment of the previous run; the others are kept.
             if let Some(index) = redo {
                 let mut pieces = recast::decode_pieces(node.outputs.get("pieces").map(String::as_str).unwrap_or_default())?;
-                let piece = pieces.get_mut(index).ok_or_else(|| AppError::Invalid(format!("Segment {} introuvable", index + 1)))?;
+                let piece = pieces.get_mut(index).ok_or_else(|| AppError::Invalid(format!("Segment {} not found", index + 1)))?;
                 let url = job.render(&fal.upload(&storage::owned_path(app, &piece.source)?).await?).await?;
                 piece.video = storage::download(app, http, &url).await?.to_string_lossy().into_owned();
                 piece.error.clear();
@@ -451,7 +471,7 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                 return Ok(out);
             }
 
-            let video = require(inputs, "video", "une vidéo source")?;
+            let video = require(inputs, "video", "a source video")?;
             let (video_url, duration) = if video.starts_with("http") {
                 (video.to_owned(), None)
             } else {
@@ -489,7 +509,7 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                             Err(err) => pieces[i].error = err.to_string(),
                         }
                         let partial = Ports::from([("pieces".to_owned(), recast::encode_pieces(&pieces))]);
-                        app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&partial), error: None })?;
+                        app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&partial), error: None, unbilled: false })?;
                     }
                     out.insert("pieces".into(), recast::encode_pieces(&pieces));
                     if let Some(video) = assemble(app, fal, http, node, &pieces).await? {
@@ -500,14 +520,14 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
         }
         "model" => {
             let def = models::find(param(node, "modelId"))
-                .ok_or_else(|| AppError::Invalid(format!("Modèle inconnu : {}", param(node, "modelId"))))?;
+                .ok_or_else(|| AppError::Invalid(format!("Unknown model: {}", param(node, "modelId"))))?;
             // Several connected prompts are joined; the inline field is the fallback.
             let prompt = match inputs.get("prompt").filter(|v| !v.is_empty()) {
                 Some(texts) => texts.join("\n\n"),
                 None => param(node, "prompt").to_owned(),
             };
             if prompt.trim().is_empty() {
-                return Err(AppError::Invalid("Prompt manquant".into()));
+                return Err(AppError::Invalid("Missing prompt".into()));
             }
             // Numbered inputs (Image 1, Image 2…) in their order; `refs`
             // for single-reference models and projects saved before.
@@ -571,8 +591,8 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             }
         }
         "addAudio" => {
-            let video = require(inputs, "video", "une vidéo")?;
-            let audio = require(inputs, "audio", "un son")?;
+            let video = require(inputs, "video", "a video")?;
+            let audio = require(inputs, "audio", "a sound")?;
             let host = |v: &str| {
                 let v = v.to_owned();
                 async move { if v.starts_with("http") { Ok(v) } else { fal.upload(&storage::owned_path(app, &v)?).await } }
@@ -602,7 +622,80 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             let path = compose::render(app, &canvas, &layers).await?;
             out.insert("media".into(), path.to_string_lossy().into_owned());
         }
-        other => return Err(AppError::Invalid(format!("Nœud inconnu : {other}"))),
+        "bpPortrait" => {
+            let source = require(inputs, "image", "an image of the character")?;
+            let assets = byteplus::Assets::from_account(http)?;
+            let previous = |k: &str| node.outputs.get(k).map(String::as_str).unwrap_or_default();
+            // The same image was sent before: follow that portrait instead of
+            // uploading it again (already validated, or review still going on).
+            let id = if previous("source") == source && !previous("assetId").is_empty() {
+                previous("assetId").to_owned()
+            } else {
+                // The library only takes a public URL: the image goes through fal storage.
+                let url = if source.starts_with("http") { source.to_owned() } else { fal.upload(&storage::owned_path(app, source)?).await? };
+                let name = match param(node, "name").trim() {
+                    "" => "Portrait",
+                    n => n,
+                };
+                let group = match param(node, "group").trim() {
+                    "" => "SimpleNode",
+                    g => g,
+                };
+                assets.create(group, &url, name).await?
+            };
+            out.insert("source".into(), source.to_owned());
+            out.insert("assetId".into(), id.clone());
+            out.insert("assetStatus".into(), "Processing".into());
+            app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&out), error: None, unbilled: false })?;
+            if !assets.wait_reviewed(&id).await? {
+                out.insert("assetStatus".into(), "Failed".into());
+                app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&out), error: None, unbilled: false })?;
+                return Err(AppError::BytePlus(byteplus::PORTRAIT_REFUSED.into()));
+            }
+            out.insert("assetStatus".into(), "Active".into());
+            out.insert("portrait".into(), format!("asset://{id}"));
+        }
+        "bpSeedance" => {
+            let bp = BytePlus::from_account(http)?;
+            let prompt = prompt_text(node, inputs);
+            let start = first(inputs, "start").map(|v| byteplus::image_input(app, v)).transpose()?;
+            let end = first(inputs, "end").map(|v| byteplus::image_input(app, v)).transpose()?;
+            let portraits = inputs.get("portraits").map(Vec::as_slice).unwrap_or_default();
+            if let Some(bad) = portraits.iter().find(|p| !p.starts_with("asset://")) {
+                return Err(AppError::Invalid(format!("The Portraits input expects a validated AI Portrait, not {bad}")));
+            }
+            let images = inputs.get("refs").map(Vec::as_slice).unwrap_or_default();
+            let refs = portraits
+                .iter()
+                .cloned()
+                .map(Ok)
+                .chain(images.iter().map(|v| byteplus::image_input(app, v)))
+                .collect::<Result<Vec<_>>>()?;
+            let body = byteplus::seedance_body(byteplus::SeedanceInput { prompt: &prompt, start, end, refs, params: &node.params })?;
+            let video = bp.video(&body).await?;
+            let path = storage::download(app, http, &video.url).await?;
+            out.insert("video".into(), path.to_string_lossy().into_owned());
+            if body.get("draft").is_some() {
+                out.insert("draftId".into(), video.id);
+                // BytePlus keeps a Draft 14 days from its creation.
+                let at = if video.created_at > 0 { (video.created_at * 1000).to_string() } else { unix_ms() };
+                out.insert("draftAt".into(), at);
+            }
+        }
+        "bpSeedream" => {
+            let bp = BytePlus::from_account(http)?;
+            let prompt = prompt_text(node, inputs);
+            let refs = inputs.get("refs").into_iter().flatten().map(|v| byteplus::image_input(app, v)).collect::<Result<Vec<_>>>()?;
+            let url = bp.image(&byteplus::seedream_body(&node.params, &prompt, &refs)?).await?;
+            let path = storage::download(app, http, &url).await?.to_string_lossy().into_owned();
+            // Only text-to-image outputs are listed as trusted inputs for Seedance.
+            if refs.is_empty() {
+                byteplus::remember_trusted(app, &path, &url)?;
+                out.insert("trustedAt".into(), unix_ms());
+            }
+            out.insert("image".into(), path);
+        }
+        other => return Err(AppError::Invalid(format!("Unknown node: {other}"))),
     }
     Ok(out)
 }
@@ -628,12 +721,14 @@ pub async fn run(
 
     for id in topo_sort(&nodes, &subset, &edges) {
         let node = nodes.iter().find(|n| n.id == id).unwrap();
-        let cached = !outputs[&id].is_empty();
+        // A portrait still under review (or refused) has outputs but no
+        // `asset://` yet: it runs again, to follow its review.
+        let cached = !outputs[&id].is_empty() && (node.kind != "bpPortrait" || outputs[&id].contains_key("portrait"));
         if target.as_deref() != Some(id.as_str()) && cached && is_remote(&node.kind) {
             continue;
         }
         let emit = |status: &str, outs: Option<&Ports>, error: Option<String>| {
-            app.emit("node-status", NodeEvent { id: &id, status, outputs: outs, error })
+            app.emit("node-status", NodeEvent { id: &id, status, outputs: outs, error, unbilled: false })
         };
 
         let incoming: Vec<_> = edges.iter().filter(|e| e.target == id).collect();
@@ -645,7 +740,7 @@ pub async fn run(
         }
         if incoming.iter().any(|e| failed.contains(&e.source)) {
             failed.insert(id.clone());
-            emit("error", None, Some("Un nœud en amont a échoué".into()))?;
+            emit("error", None, Some("An upstream node failed".into()))?;
             continue;
         }
         let mut inputs = Inputs::new();
@@ -694,7 +789,7 @@ pub async fn run(
         let result = match futures::future::select(work, stop).await {
             futures::future::Either::Left((result, _)) => result,
             futures::future::Either::Right(_) => {
-                tx.send_replace(Some(Err("Arrêté".into())));
+                tx.send_replace(Some(Err("Stopped".into())));
                 stopped.insert(id.clone());
                 emit("idle", None, None)?;
                 continue;
@@ -708,7 +803,8 @@ pub async fn run(
             }
             Err(err) => {
                 failed.insert(id.clone());
-                emit("error", None, Some(err.to_string()))?;
+                let event = NodeEvent { id: &id, status: "error", outputs: None, error: Some(err.to_string()), unbilled: err.unbilled() };
+                app.emit("node-status", event)?;
             }
         }
     }

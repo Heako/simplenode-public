@@ -80,7 +80,7 @@ pub fn encode_pieces(pieces: &[Piece]) -> String {
 }
 
 pub fn decode_pieces(value: &str) -> Result<Vec<Piece>> {
-    serde_json::from_str(value).map_err(|_| AppError::Invalid("Aucun segment à refaire : exécutez d'abord le nœud".into()))
+    serde_json::from_str(value).map_err(|_| AppError::Invalid("No segment to redo: run the node first".into()))
 }
 
 /// What a first pass over the source gives.
@@ -161,32 +161,32 @@ pub struct Choice {
 pub static MODES: &[Mode] = &[
     Mode {
         id: "replace",
-        label: "Remplacer",
-        hint: "Garde la scène, la lumière, la caméra et le son ; remplace les personnes par vos personnages.",
+        label: "Replace",
+        hint: "Keeps the scene, lighting, camera and sound; replaces the people with your characters.",
         prompt: "Replace the person in the video with the person in the reference photo. \
                  Keep their face, hair and outfit exactly as in the photo in every frame.",
         models: &[
             Choice {
                 id: "h3-max-recast",
-                note: "Jusqu'à 4 personnages, associés aux personnes de gauche à droite. Vidéo de 5 s minimum ; si un plan dépasse 15 s, \
-                       elle est découpée en segments égaux, à assembler ensuite si le résultat vous convient.",
+                note: "Up to 4 characters, matched to the people from left to right. Video of 5 s minimum; if a shot runs over 15 s, \
+                       it is cut into equal segments, to merge afterwards if you like the result.",
             },
-            Choice { id: "wan-2.2-animate-replace", note: "Un personnage. Moins cher, 720p au plus." },
+            Choice { id: "wan-2.2-animate-replace", note: "One character. Cheaper, 720p at most." },
         ],
     },
     Mode {
         id: "motion",
-        label: "Mouvement",
-        hint: "Anime votre personnage, dans son propre décor, avec les gestes et la caméra de la vidéo.",
+        label: "Motion",
+        hint: "Animates your character, in their own setting, with the gestures and camera of the video.",
         prompt: "Keep the character's face, hair and outfit exactly as in the reference photo in every frame.",
         models: &[
             Choice {
                 id: "kling-3-pro-motion",
-                note: "Un personnage. Au-delà de 30 s (10 s en cadrage « image »), la vidéo est découpée en segments, à assembler ensuite.",
+                note: "One character. Beyond 30 s (10 s with \"image\" framing), the video is cut into segments, to merge afterwards.",
             },
             Choice {
                 id: "kling-3-standard-motion",
-                note: "Un personnage, version économique. Au-delà de 30 s (10 s en cadrage « image »), la vidéo est découpée en segments, à assembler ensuite.",
+                note: "One character, budget version. Beyond 30 s (10 s with \"image\" framing), the video is cut into segments, to merge afterwards.",
             },
         ],
     },

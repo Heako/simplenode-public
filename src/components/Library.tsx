@@ -23,6 +23,7 @@ import {
   Type,
   WandSparkles,
   Wrench,
+  ScanFace,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -34,22 +35,22 @@ import { libraryItems, useModels, type LibraryItem } from "@/lib/spec";
 type Section = "search" | "tools" | "image" | "video" | "audio" | "text";
 
 const RAIL: { id: Section; label: string; icon: LucideIcon }[] = [
-  { id: "search", label: "Tout", icon: Search },
-  { id: "tools", label: "Outils", icon: Wrench },
+  { id: "search", label: "All", icon: Search },
+  { id: "tools", label: "Tools", icon: Wrench },
   { id: "image", label: "Image", icon: ImageIcon },
-  { id: "video", label: "Vidéo", icon: Clapperboard },
+  { id: "video", label: "Video", icon: Clapperboard },
   { id: "audio", label: "Audio", icon: AudioLines },
-  { id: "text", label: "Texte", icon: Sparkles },
+  { id: "text", label: "Text", icon: Sparkles },
 ];
 
 export const GROUP_TITLES: Record<LibraryItem["group"], string> = {
-  inputs: "Entrées",
-  tools: "Outils",
-  image: "Modèles d'image",
-  video: "Modèles vidéo",
-  audio: "Musique & son",
-  text: "Texte & analyse",
-  outputs: "Sorties",
+  inputs: "Inputs",
+  tools: "Tools",
+  image: "Image models",
+  video: "Video models",
+  audio: "Music & sound",
+  text: "Text & analysis",
+  outputs: "Outputs",
 };
 
 const GROUP_ORDER: LibraryItem["group"][] = ["inputs", "tools", "image", "video", "audio", "text", "outputs"];
@@ -74,6 +75,7 @@ const KIND_ICONS: Partial<Record<LibraryItem["kind"], LucideIcon>> = {
   videoDescriber: Film,
   addAudio: AudioLines,
   compositor: Layers,
+  bpPortrait: ScanFace,
 };
 
 export function itemIcon(item: LibraryItem): LucideIcon {
@@ -207,7 +209,7 @@ export default function Library({ onHome }: { onHome: () => void }) {
         <button
           className="mb-2 grid h-7 w-7 place-items-center rounded-md bg-accent text-xs font-bold hover:opacity-80"
           onClick={onHome}
-          title="Retour à l'accueil"
+          title="Back to home"
         >
           S
         </button>
@@ -234,7 +236,7 @@ export default function Library({ onHome }: { onHome: () => void }) {
             <Search size={12} className="text-muted" />
             <input
               className="w-full bg-transparent text-[11px] outline-none placeholder:text-muted"
-              placeholder="Rechercher"
+              placeholder="Search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -254,10 +256,10 @@ export default function Library({ onHome }: { onHome: () => void }) {
                 </section>
               );
             })}
-            {!visible.length && <div className="mt-6 text-center text-[11px] text-muted">Aucun résultat</div>}
+            {!visible.length && <div className="mt-6 text-center text-[11px] text-muted">No results</div>}
           </div>
           <p className="border-t border-line px-3 py-2 text-[10px] leading-snug text-muted">
-            Glissez une tuile sur le canvas, ou clic droit sur le canvas.
+            Drag a tile onto the canvas, or right-click the canvas.
           </p>
         </aside>
       )}

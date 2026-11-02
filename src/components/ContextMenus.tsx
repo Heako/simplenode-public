@@ -122,7 +122,7 @@ export function AddNodeMenu({ x, y, link, onClose }: { x: number; y: number; lin
         <input
           autoFocus
           className="w-full bg-transparent text-xs outline-none placeholder:text-muted"
-          placeholder={link ? "Relier à un nouveau nœud…" : "Ajouter un nœud…"}
+          placeholder={link ? "Connect to a new node…" : "Add a node…"}
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
@@ -156,7 +156,7 @@ export function AddNodeMenu({ x, y, link, onClose }: { x: number; y: number; lin
             </div>
           );
         })}
-        {!items.length && <div className="px-2.5 py-3 text-center text-[11px] text-muted">Aucun résultat</div>}
+        {!items.length && <div className="px-2.5 py-3 text-center text-[11px] text-muted">No results</div>}
       </div>
     </Frame>
   );
@@ -181,12 +181,12 @@ export function NodeMenu({ x, y, nodeId, onClose }: { x: number; y: number; node
   const deleteNode = useFlow((s) => s.deleteNode);
 
   const entries: { label: string; hint?: string; icon: LucideIcon; disabled?: boolean; danger?: boolean; action: () => void }[] = [
-    { label: "Exécuter jusqu'ici", icon: Play, disabled: running, action: () => run(nodeId) },
-    { label: "Renommer", icon: PencilLine, action: () => setRenaming(nodeId) },
-    { label: "Copier", hint: "⌘C", icon: Copy, action: () => copyNodes(nodeId) },
-    { label: "Dupliquer", hint: "⌘D", icon: CopyPlus, action: () => duplicateNode(nodeId) },
-    ...(isModel ? [{ label: "Vider les résultats", icon: Eraser, disabled: !hasResults || running, action: () => purgeResults([nodeId]) }] : []),
-    { label: "Supprimer", icon: Trash2, danger: true, action: () => deleteNode(nodeId) },
+    { label: "Run up to here", icon: Play, disabled: running, action: () => run(nodeId) },
+    { label: "Rename", icon: PencilLine, action: () => setRenaming(nodeId) },
+    { label: "Copy", hint: "⌘C", icon: Copy, action: () => copyNodes(nodeId) },
+    { label: "Duplicate", hint: "⌘D", icon: CopyPlus, action: () => duplicateNode(nodeId) },
+    ...(isModel ? [{ label: "Clear results", icon: Eraser, disabled: !hasResults || running, action: () => purgeResults([nodeId]) }] : []),
+    { label: "Delete", icon: Trash2, danger: true, action: () => deleteNode(nodeId) },
   ];
 
   return (

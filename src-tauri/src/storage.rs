@@ -52,7 +52,7 @@ pub fn new_path(app: &AppHandle, ext: &str) -> Result<PathBuf> {
 pub fn owned_path(app: &AppHandle, value: &str) -> Result<PathBuf> {
     let path = std::fs::canonicalize(value)?;
     if !path.starts_with(std::fs::canonicalize(images_dir(app)?)?) {
-        return Err(AppError::Invalid("Chemin hors du stockage de l'app".into()));
+        return Err(AppError::Invalid("Path outside the app's storage".into()));
     }
     Ok(path)
 }
@@ -119,11 +119,11 @@ fn mvhd_duration(moov: &[u8]) -> Option<f64> {
 pub fn import(app: &AppHandle, source: &Path) -> Result<PathBuf> {
     let ext = extension(source);
     let mime = mime_for(&ext)
-        .ok_or_else(|| AppError::Invalid("Format non pris en charge (png, jpg, webp, gif, mp4, mov, webm, mp3, wav, m4a, aac, ogg)".into()))?;
+        .ok_or_else(|| AppError::Invalid("Unsupported format (png, jpg, webp, gif, mp4, mov, webm, mp3, wav, m4a, aac, ogg)".into()))?;
     let (limit, label) = if mime.starts_with("image/") {
-        (MAX_IMAGE_BYTES, "Image trop lourde (20 Mo max)")
+        (MAX_IMAGE_BYTES, "Image too large (20 MB max)")
     } else {
-        (MAX_VIDEO_BYTES, "Fichier trop lourd (90 Mo max)")
+        (MAX_VIDEO_BYTES, "File too large (90 MB max)")
     };
     if std::fs::metadata(source)?.len() > limit {
         return Err(AppError::Invalid(label.into()));
@@ -166,7 +166,7 @@ pub fn to_model_input(app: &AppHandle, value: &str) -> Result<String> {
     let path = owned_path(app, value)?;
     let mime = mime_for(&extension(&path))
         .filter(|m| m.starts_with("image/"))
-        .ok_or_else(|| AppError::Invalid("Ce n'est pas une image".into()))?;
+        .ok_or_else(|| AppError::Invalid("Not an image".into()))?;
     Ok(format!("data:{mime};base64,{}", STANDARD.encode(std::fs::read(&path)?)))
 }
 
@@ -253,13 +253,13 @@ fn crop_rect(width: u32, height: u32, spec: &CropSpec) -> (u32, u32, u32, u32) {
 
 pub fn crop(app: &AppHandle, value: &str, spec: &CropSpec) -> Result<PathBuf> {
     let source = owned_path(app, value)?;
-    let img = image::open(&source).map_err(|e| AppError::Invalid(format!("Image illisible : {e}")))?;
+    let img = image::open(&source).map_err(|e| AppError::Invalid(format!("Unreadable image: {e}")))?;
     let (x, y, w, h) = crop_rect(img.width(), img.height(), spec);
     let dest = new_path(app, "png")?;
     img.view(x, y, w, h)
         .to_image()
         .save(&dest)
-        .map_err(|e| AppError::Invalid(format!("Écriture impossible : {e}")))?;
+        .map_err(|e| AppError::Invalid(format!("Cannot write: {e}")))?;
     Ok(dest)
 }
 
@@ -276,7 +276,7 @@ pub fn encode_views(views: &[View]) -> String {
 }
 
 pub fn decode_views(value: &str) -> Result<Vec<View>> {
-    serde_json::from_str(value).map_err(|_| AppError::Invalid("Entrée attendue : un ensemble de plans".into()))
+    serde_json::from_str(value).map_err(|_| AppError::Invalid("Expected input: a set of shots".into()))
 }
 
 /// File-name friendly version of a label: "Contre-plongée" -> "contre-plongee".
@@ -304,7 +304,7 @@ pub fn slug(label: &str) -> String {
 /// Saves one stored file where the user chose (the "download" button).
 pub fn save_copy(app: &AppHandle, value: &str, dest: &Path) -> Result<()> {
     if !dest.is_absolute() {
-        return Err(AppError::Invalid("Destination invalide".into()));
+        return Err(AppError::Invalid("Invalid destination".into()));
     }
     std::fs::copy(owned_path(app, value)?, dest)?;
     Ok(())
@@ -314,7 +314,7 @@ pub fn save_copy(app: &AppHandle, value: &str, dest: &Path) -> Result<()> {
 pub fn export_views(app: &AppHandle, views: &[View], folder: &str) -> Result<usize> {
     let folder = PathBuf::from(folder);
     if !folder.is_absolute() {
-        return Err(AppError::Invalid("Choisissez un dossier d'export".into()));
+        return Err(AppError::Invalid("Choose an export folder".into()));
     }
     std::fs::create_dir_all(&folder)?;
     for (i, view) in views.iter().enumerate() {
@@ -349,10 +349,10 @@ fn grid_cells(width: u32, height: u32, rows: u32, cols: u32, inset: f64) -> Vec<
 /// Splits a contact sheet into one image per cell, row-major.
 pub fn grid_crop(app: &AppHandle, value: &str, rows: u32, cols: u32, inset: f64) -> Result<Vec<PathBuf>> {
     if !(1..=MAX_GRID).contains(&rows) || !(1..=MAX_GRID).contains(&cols) {
-        return Err(AppError::Invalid(format!("Grille de 1×1 à {MAX_GRID}×{MAX_GRID}")));
+        return Err(AppError::Invalid(format!("Grid from 1×1 to {MAX_GRID}×{MAX_GRID}")));
     }
     let source = owned_path(app, value)?;
-    let img = image::open(&source).map_err(|e| AppError::Invalid(format!("Image illisible : {e}")))?;
+    let img = image::open(&source).map_err(|e| AppError::Invalid(format!("Unreadable image: {e}")))?;
     grid_cells(img.width(), img.height(), rows, cols, inset)
         .into_iter()
         .map(|(x, y, w, h)| {
@@ -360,7 +360,7 @@ pub fn grid_crop(app: &AppHandle, value: &str, rows: u32, cols: u32, inset: f64)
             img.view(x, y, w, h)
                 .to_image()
                 .save(&dest)
-                .map_err(|e| AppError::Invalid(format!("Écriture impossible : {e}")))?;
+                .map_err(|e| AppError::Invalid(format!("Cannot write: {e}")))?;
             Ok(dest)
         })
         .collect()

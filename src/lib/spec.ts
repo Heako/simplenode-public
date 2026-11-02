@@ -2,7 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { create } from "zustand";
 
 /** `views`: a set of labelled images (camera angles, grid tiles), JSON-encoded. */
-export type PortType = "text" | "image" | "video" | "audio" | "views" | "any";
+/** `portrait`: a BytePlus portrait validated in the user's library (`asset://…`). */
+export type PortType = "text" | "image" | "video" | "audio" | "views" | "portrait" | "any";
 
 export type NodeKind =
   | "prompt"
@@ -22,7 +23,10 @@ export type NodeKind =
   | "angleExport"
   | "recast"
   | "addAudio"
-  | "compositor";
+  | "compositor"
+  | "bpPortrait"
+  | "bpSeedance"
+  | "bpSeedream";
 
 export type NodeStatus = "idle" | "running" | "done" | "error";
 
@@ -80,6 +84,8 @@ export interface NodeData extends Record<string, unknown> {
   cover?: string;
   /** A Seedance draft being rendered in 1080p (src/lib/draft.ts). */
   finalizing?: boolean;
+  /** The last error came before any generation was billed (MCP budget refunds). */
+  unbilled?: boolean;
 }
 
 export const PORT_COLORS: Record<PortType, string> = {
@@ -88,6 +94,7 @@ export const PORT_COLORS: Record<PortType, string> = {
   video: "#3ecfa0",
   audio: "#4fb3ff",
   views: "#e86fb5",
+  portrait: "#ff8a5c",
   any: "#9a9aa3",
 };
 
@@ -217,80 +224,104 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
     case "prompt":
       return {
         inputs: promptVars(data.params).map((name) => ({ id: `var:${name}`, label: varLabel(name), type: "text" })),
-        outputs: [{ id: "text", label: "Texte", type: "text" }],
+        outputs: [{ id: "text", label: "Text", type: "text" }],
       };
     case "list":
-      return { inputs: [], outputs: [{ id: "text", label: "Élément choisi", type: "text" }] };
+      return { inputs: [], outputs: [{ id: "text", label: "Chosen item", type: "text" }] };
     case "image": {
       const media = data.params.media === "video" || data.params.media === "audio" ? data.params.media : "image";
-      const label = { image: "Image", video: "Vidéo", audio: "Audio" }[media];
+      const label = { image: "Image", video: "Video", audio: "Audio" }[media];
       return { inputs: [], outputs: [{ id: media, label, type: media }] };
     }
     case "preview":
       // Passes its value on, so a result checked here can feed the next step.
-      return { inputs: [{ id: "value", label: "Entrée", type: "any" }], outputs: [{ id: "value", label: "Sortie", type: "any" }] };
+      return { inputs: [{ id: "value", label: "Input", type: "any" }], outputs: [{ id: "value", label: "Output", type: "any" }] };
     case "router":
-      return { inputs: [{ id: "value", label: "Entrée", type: "any" }], outputs: [{ id: "value", label: "Sortie", type: "any" }] };
+      return { inputs: [{ id: "value", label: "Input", type: "any" }], outputs: [{ id: "value", label: "Output", type: "any" }] };
     case "concat":
       return {
-        inputs: [{ id: "texts", label: "Textes", type: "text", multiple: true }],
-        outputs: [{ id: "text", label: "Texte", type: "text" }],
+        inputs: [{ id: "texts", label: "Texts", type: "text", multiple: true }],
+        outputs: [{ id: "text", label: "Text", type: "text" }],
       };
     case "crop":
       return { inputs: [{ id: "image", label: "Image", type: "image" }], outputs: [{ id: "image", label: "Image", type: "image" }] };
     case "compositor":
       return {
         inputs: [
-          { id: "bg", label: layerName(data.params, "bg") ?? "Arrière-plan", type: "any" },
-          ...compositorLayers(data.params).map((i): Port => ({ id: `layer${i}`, label: layerName(data.params, `layer${i}`) ?? `Calque ${i}`, type: "any" })),
+          { id: "bg", label: layerName(data.params, "bg") ?? "Background", type: "any" },
+          ...compositorLayers(data.params).map((i): Port => ({ id: `layer${i}`, label: layerName(data.params, `layer${i}`) ?? `Layer ${i}`, type: "any" })),
         ],
-        outputs: [{ id: "media", label: "Sortie", type: "any" }],
+        outputs: [{ id: "media", label: "Output", type: "any" }],
       };
     case "addAudio":
       return {
         inputs: [
-          { id: "video", label: "Vidéo", type: "video" },
-          { id: "audio", label: "Son", type: "audio" },
+          { id: "video", label: "Video", type: "video" },
+          { id: "audio", label: "Sound", type: "audio" },
         ],
-        outputs: [{ id: "video", label: "Vidéo", type: "video" }],
+        outputs: [{ id: "video", label: "Video", type: "video" }],
       };
     case "angles": {
       return {
         inputs: [
-          { id: "image", label: "Référence", type: "image" },
-          { id: "context", label: "Contexte (optionnel)", type: "text" },
+          { id: "image", label: "Reference", type: "image" },
+          { id: "context", label: "Context (optional)", type: "text" },
         ],
-        outputs: [{ id: "views", label: "Plans", type: "views" }],
+        outputs: [{ id: "views", label: "Shots", type: "views" }],
       };
     }
     case "anglePick":
-      return { inputs: [{ id: "views", label: "Plans", type: "views" }], outputs: [{ id: "image", label: "Plan choisi", type: "image" }] };
+      return { inputs: [{ id: "views", label: "Shots", type: "views" }], outputs: [{ id: "image", label: "Chosen shot", type: "image" }] };
     case "angleExport":
-      return { inputs: [{ id: "views", label: "Plans", type: "views" }], outputs: [] };
+      return { inputs: [{ id: "views", label: "Shots", type: "views" }], outputs: [] };
     case "gridCrop":
-      return { inputs: [{ id: "image", label: "Planche", type: "image" }], outputs: [{ id: "views", label: "Vues", type: "views" }] };
+      return { inputs: [{ id: "image", label: "Sheet", type: "image" }], outputs: [{ id: "views", label: "Views", type: "views" }] };
     case "enhancer":
       return { inputs: [{ id: "text", label: "Prompt", type: "text", multiple: true }], outputs: [{ id: "text", label: "Prompt", type: "text" }] };
     case "describer":
-      return { inputs: [{ id: "image", label: "Image", type: "image" }], outputs: [{ id: "text", label: "Texte", type: "text" }] };
+      return { inputs: [{ id: "image", label: "Image", type: "image" }], outputs: [{ id: "text", label: "Text", type: "text" }] };
     case "videoDescriber":
-      return { inputs: [{ id: "video", label: "Vidéo", type: "video" }], outputs: [{ id: "text", label: "Texte", type: "text" }] };
+      return { inputs: [{ id: "video", label: "Video", type: "video" }], outputs: [{ id: "text", label: "Text", type: "text" }] };
     case "recast": {
       const most = findModel(data.params.modelId)?.maxRefs ?? 1;
       return {
         inputs: [
-          { id: "video", label: "Vidéo source", type: "video" },
-          { id: "characters", label: most > 1 ? `Personnages (≤${most})` : "Personnage", type: "image", multiple: most > 1 },
-          { id: "prompt", label: "Consignes (optionnel)", type: "text", multiple: true },
+          { id: "video", label: "Source video", type: "video" },
+          { id: "characters", label: most > 1 ? `Characters (≤${most})` : "Character", type: "image", multiple: most > 1 },
+          { id: "prompt", label: "Instructions (optional)", type: "text", multiple: true },
         ],
-        outputs: [{ id: "video", label: "Vidéo", type: "video" }],
+        outputs: [{ id: "video", label: "Video", type: "video" }],
       };
     }
+    case "bpPortrait":
+      return {
+        inputs: [{ id: "image", label: "Character image", type: "image" }],
+        outputs: [{ id: "portrait", label: "Portrait", type: "portrait" }],
+      };
+    case "bpSeedance":
+      return {
+        inputs: [
+          { id: "prompt", label: "Prompt", type: "text", multiple: true },
+          { id: "portraits", label: "Portraits", type: "portrait", multiple: true },
+          { id: "refs", label: "Reference images", type: "image", multiple: true },
+          { id: "start", label: "Start image", type: "image" },
+          { id: "end", label: "End image", type: "image" },
+        ],
+        outputs: [{ id: "video", label: "Video", type: "video" }],
+      };
+    case "bpSeedream":
+      return {
+        inputs: [
+          { id: "prompt", label: "Prompt", type: "text", multiple: true },
+          { id: "refs", label: "References (≤10)", type: "image", multiple: true },
+        ],
+        outputs: [{ id: "image", label: "Image", type: "image" }],
+      };
     case "model": {
       const model = findModel(data.params.modelId);
       const inputs: Port[] = [{ id: "prompt", label: "Prompt", type: "text", multiple: true }];
       // Prompt and negative prompt first, then media, as in Weave.
-      if (model?.negative) inputs.push({ id: "negative", label: "Prompt négatif", type: "text", multiple: true });
+      if (model?.negative) inputs.push({ id: "negative", label: "Negative prompt", type: "text", multiple: true });
       const isVideo = model?.category === "video";
       if (model && model.maxRefs > 1) {
         // One input per reference, so their order (image 1, image 2…) is explicit.
@@ -298,27 +329,27 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       } else if (model && model.maxRefs > 0) {
         inputs.push({
           id: "refs",
-          label: model.refsLabel ?? (isVideo ? "Image de départ" : model.maxRefs > 1 ? `Références (≤${model.maxRefs})` : "Référence"),
+          label: model.refsLabel ?? (isVideo ? "Start image" : model.maxRefs > 1 ? `References (≤${model.maxRefs})` : "Reference"),
           type: "image",
           multiple: model.maxRefs > 1,
         });
       }
-      if (model?.endField) inputs.push({ id: "endFrame", label: "Image de fin", type: "image" });
+      if (model?.endField) inputs.push({ id: "endFrame", label: "End image", type: "image" });
       for (const m of model?.media ?? []) {
         inputs.push({
           id: `media:${m.key}`,
-          label: m.mode === "edit" ? `${m.label} (avec réf.)` : m.label,
+          label: m.mode === "edit" ? `${m.label} (with ref.)` : m.label,
           type: m.kind,
           multiple: m.multiple,
         });
       }
       const out: Port =
         model?.category === "llm"
-          ? { id: "text", label: "Texte", type: "text" }
+          ? { id: "text", label: "Text", type: "text" }
           : model?.category === "audio"
-            ? { id: "audio", label: "Son", type: "audio" }
+            ? { id: "audio", label: "Sound", type: "audio" }
             : isVideo
-            ? { id: "video", label: "Vidéo", type: "video" }
+            ? { id: "video", label: "Video", type: "video" }
             : { id: "image", label: "Image", type: "image" };
       return { inputs, outputs: [out] };
     }
@@ -419,6 +450,12 @@ export function defaultParams(kind: NodeKind, modelId?: string): Record<string, 
       return { question: "", detailed: "false" };
     case "recast":
       return { ...recastParams("replace"), prompt: recastPrompt("replace"), segment: "10" };
+    case "bpPortrait":
+      return { name: "", group: "SimpleNode" };
+    case "bpSeedance":
+      return { prompt: "", duration: "5", ratio: "adaptive", audio: "true", draft: "true", resolution: "1080p", seed: "" };
+    case "bpSeedream":
+      return { prompt: "", model: "pro", size: "2K" };
     case "model": {
       const model = findModel(modelId);
       const params: Record<string, string> = { modelId: modelId ?? "", prompt: "" };
@@ -457,21 +494,24 @@ const AUDIO_TOOLS = new Set(["mmaudio-v2-video"]);
 
 export function libraryItems(models: ModelDef[]): LibraryItem[] {
   return [
-    { key: "prompt", kind: "prompt", label: "Prompt", hint: "Texte libre", group: "inputs" },
-    { key: "image", kind: "image", label: "Import", hint: "Image, vidéo ou audio local", group: "inputs" },
-    { key: "list", kind: "list", label: "List", hint: "Choisir un texte parmi plusieurs", group: "tools" },
-    { key: "angles", kind: "angles", label: "Angles caméra", hint: "Génère plusieurs plans d'une image (IA)", group: "tools" },
-    { key: "anglePick", kind: "anglePick", label: "Aperçu des angles", hint: "Choisir un plan parmi les angles", group: "tools" },
-    { key: "gridCrop", kind: "gridCrop", label: "Grid Crop", hint: "Découpe une planche existante (ne génère rien)", group: "tools" },
-    { key: "router", kind: "router", label: "Router", hint: "Une entrée vers plusieurs sorties", group: "tools" },
-    { key: "concat", kind: "concat", label: "Prompt Concatenator", hint: "Assembler plusieurs textes", group: "tools" },
-    { key: "crop", kind: "crop", label: "Crop", hint: "Recadrer une image", group: "tools" },
-    { key: "enhancer", kind: "enhancer", label: "Prompt Enhancer", hint: "Enrichir un prompt (LLM)", group: "text" },
-    { key: "describer", kind: "describer", label: "Image Describer", hint: "Image → texte (LLM)", group: "text" },
-    { key: "videoDescriber", kind: "videoDescriber", label: "Video Describer", hint: "Vidéo → texte", group: "text" },
-    { key: "compositor", kind: "compositor", label: "Compositeur", hint: "Calques d'images, de vidéos et de sons", group: "video" },
-    { key: "recast", kind: "recast", label: "Recast", hint: "Vidéo source + personnage → nouvelle vidéo", group: "video" },
-    { key: "addAudio", kind: "addAudio", label: "Ajouter le son", hint: "Pose une piste son sur une vidéo", group: "audio" },
+    { key: "prompt", kind: "prompt", label: "Prompt", hint: "Free text", group: "inputs" },
+    { key: "image", kind: "image", label: "Import", hint: "Local image, video or audio", group: "inputs" },
+    { key: "list", kind: "list", label: "List", hint: "Pick one text among several", group: "tools" },
+    { key: "angles", kind: "angles", label: "Camera angles", hint: "Generates several shots of an image (AI)", group: "tools" },
+    { key: "anglePick", kind: "anglePick", label: "Angle picker", hint: "Pick one shot among the angles", group: "tools" },
+    { key: "gridCrop", kind: "gridCrop", label: "Grid Crop", hint: "Cuts an existing sheet (generates nothing)", group: "tools" },
+    { key: "router", kind: "router", label: "Router", hint: "One input to several outputs", group: "tools" },
+    { key: "concat", kind: "concat", label: "Prompt Concatenator", hint: "Join several texts", group: "tools" },
+    { key: "crop", kind: "crop", label: "Crop", hint: "Crop an image", group: "tools" },
+    { key: "enhancer", kind: "enhancer", label: "Prompt Enhancer", hint: "Enrich a prompt (LLM)", group: "text" },
+    { key: "describer", kind: "describer", label: "Image Describer", hint: "Image → text (LLM)", group: "text" },
+    { key: "videoDescriber", kind: "videoDescriber", label: "Video Describer", hint: "Video → text", group: "text" },
+    { key: "compositor", kind: "compositor", label: "Compositor", hint: "Layers of images, videos and sounds", group: "video" },
+    { key: "recast", kind: "recast", label: "Recast", hint: "Source video + character → new video", group: "video" },
+    { key: "addAudio", kind: "addAudio", label: "Add sound", hint: "Puts a sound track on a video", group: "audio" },
+    { key: "bpPortrait", kind: "bpPortrait", label: "AI Portrait (BytePlus)", hint: "AI character validated for Seedance", group: "image" },
+    { key: "bpSeedream", kind: "bpSeedream", label: "Seedream (BytePlus)", hint: "BytePlus ModelArk · trusted image", group: "image" },
+    { key: "bpSeedance", kind: "bpSeedance", label: "Seedance 2.5 (BytePlus)", hint: "BytePlus ModelArk · faces through portraits", group: "video" },
     ...models.filter((m) => !isRecastModel(m.id)).map<LibraryItem>((m) => ({
       key: m.id,
       kind: "model",
@@ -480,7 +520,7 @@ export function libraryItems(models: ModelDef[]): LibraryItem[] {
       hint: m.provider,
       group: m.category === "llm" ? "text" : AUDIO_TOOLS.has(m.id) ? "audio" : m.category,
     })),
-    { key: "angleExport", kind: "angleExport", label: "Export des angles", hint: "Enregistrer tous les plans dans un dossier", group: "outputs" },
-    { key: "preview", kind: "preview", label: "Preview", hint: "Afficher un résultat", group: "outputs" },
+    { key: "angleExport", kind: "angleExport", label: "Export angles", hint: "Save every shot in a folder", group: "outputs" },
+    { key: "preview", kind: "preview", label: "Preview", hint: "Show a result", group: "outputs" },
   ];
 }

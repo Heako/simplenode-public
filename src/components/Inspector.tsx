@@ -91,7 +91,7 @@ function SettingControl({ setting, value, onChange }: { setting: Shown; value: s
         <label className="block">
           <Label setting={setting} />
           <select className={field} value={current} onChange={(e) => onChange(e.target.value)}>
-            {!setting.default && <option value="">Par défaut</option>}
+            {!setting.default && <option value="">Default</option>}
             {setting.options.map((o) => (
               <option key={o} value={o}>
                 {optionLabel(setting.key, o)}
@@ -124,7 +124,7 @@ function SettingControl({ setting, value, onChange }: { setting: Shown; value: s
                 className={`${field} min-w-0 flex-1 disabled:opacity-40`}
                 disabled={random}
                 value={random ? "" : current}
-                placeholder="aléatoire"
+                placeholder="random"
                 onChange={(e) => onChange(e.target.value)}
               />
               <label className="flex shrink-0 items-center gap-1.5 text-xs">
@@ -134,7 +134,7 @@ function SettingControl({ setting, value, onChange }: { setting: Shown; value: s
                   checked={random}
                   onChange={(e) => onChange(e.target.checked ? "" : String(Math.floor(Math.random() * 1_000_000)))}
                 />
-                Aléatoire
+                Random
               </label>
             </div>
           </div>
@@ -164,7 +164,7 @@ function SettingControl({ setting, value, onChange }: { setting: Shown; value: s
               max={setting.max ?? undefined}
               step={step}
               value={current}
-              placeholder="défaut"
+              placeholder="default"
               onChange={(e) => onChange(e.target.value)}
             />
           </div>
@@ -186,7 +186,7 @@ const KIND_ORDER: Record<Setting["kind"], number> = { select: 0, integer: 1, num
 const rank = (s: Setting) => (s.key === "seed" ? 9 : KIND_ORDER[s.kind]);
 
 function money(value: number, currency: string) {
-  return new Intl.NumberFormat("fr-FR", { style: "currency", currency, maximumFractionDigits: value < 1 ? 3 : 2 }).format(value);
+  return new Intl.NumberFormat("en-US", { style: "currency", currency, maximumFractionDigits: value < 1 ? 3 : 2 }).format(value);
 }
 
 /**
@@ -256,7 +256,7 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const otherOnly: Shown[] = Array.isArray(otherList) && Array.isArray(list)
     ? otherList
         .filter((s) => !list.some((l) => l.key === s.key))
-        .map((s) => ({ ...s, onlyIn: refsWired ? "sans réf." : model.category === "video" ? "avec image" : "avec réf." }))
+        .map((s) => ({ ...s, onlyIn: refsWired ? "without ref." : model.category === "video" ? "with image" : "with ref." }))
     : [];
   const extra: Shown[] = [...(Array.isArray(list) ? list : []), ...otherOnly]
     .filter((s) => !own.has(s.key))
@@ -271,7 +271,7 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const tokens = seedanceEstimate(model.id, data.params, { price });
   const currency = price?.currency ?? "USD";
   const control = (s: Shown, key: string) => (
-    <div key={s.key} className={s.onlyIn ? "opacity-60" : undefined} title={s.onlyIn ? "Appliqué seulement dans ce mode" : undefined}>
+    <div key={s.key} className={s.onlyIn ? "opacity-60" : undefined} title={s.onlyIn ? "Only applied in this mode" : undefined}>
       <SettingControl setting={s} value={data.params[key]} onChange={(v) => setParam(id, key, v)} />
     </div>
   );
@@ -299,20 +299,20 @@ function ModelInspector({ node }: { node: FlowNode }) {
           <div className="truncate text-[13px] font-medium">{data.title || model.label}</div>
           <div className="truncate text-[10px] text-muted">
             {model.provider} ·{" "}
-            {data.kind === "recast" ? "vidéo → vidéo" : refsWired ? (model.category === "video" ? "image → vidéo" : "édition") : "texte →"}
+            {data.kind === "recast" ? "video → video" : refsWired ? (model.category === "video" ? "image → video" : "edit") : "text →"}
           </div>
         </div>
         {rate != null ? (
           <span
             className="shrink-0 rounded-md bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted tabular-nums"
-            title={`Tarif fal : ${money(rate, currency)} par seconde de vidéo, à cette résolution`}
+            title={`fal price: ${money(rate, currency)} per second of video, at this resolution`}
           >
             {money(rate, currency)} / s
           </span>
         ) : price?.unitPrice != null && (
           <span
             className="shrink-0 rounded-md bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted tabular-nums"
-            title={`Tarif fal : ${money(price.unitPrice, price.currency ?? "USD")} par ${price.unit}`}
+            title={`fal price: ${money(price.unitPrice, price.currency ?? "USD")} per ${price.unit}`}
           >
             {money(price.unitPrice, price.currency ?? "USD")}
             {perRun ? "" : ` / ${price.unit}`}
@@ -322,28 +322,28 @@ function ModelInspector({ node }: { node: FlowNode }) {
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">Réglages</h3>
+          <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">Settings</h3>
           {touched && (
-            <button className="flex items-center gap-1 text-[10px] text-muted hover:text-fg" onClick={reset} title="Revenir aux valeurs par défaut de fal">
-              <RotateCcw size={10} /> Réinitialiser
+            <button className="flex items-center gap-1 text-[10px] text-muted hover:text-fg" onClick={reset} title="Back to fal's defaults">
+              <RotateCcw size={10} /> Reset
             </button>
           )}
         </div>
         {main.map((s) => control(s, s.key))}
         {list === undefined && <Loader2 size={14} className="animate-spin text-muted" />}
-        {list === "error" && <p className="text-[11px] text-muted">Réglages indisponibles (schéma fal inaccessible).</p>}
-        {Array.isArray(list) && extra.length === 0 && main.length === 0 && <p className="text-[11px] text-muted">Aucun réglage pour ce modèle.</p>}
+        {list === "error" && <p className="text-[11px] text-muted">Settings unavailable (fal schema unreachable).</p>}
+        {Array.isArray(list) && extra.length === 0 && main.length === 0 && <p className="text-[11px] text-muted">No settings for this model.</p>}
         {common.map((s) => control(s, `x:${s.key}`))}
         {advanced.length > 0 && (
           <details className="group/adv border-t border-line pt-3">
             <summary className="flex cursor-pointer list-none items-center gap-1 text-[11px] font-medium tracking-wide text-muted uppercase select-none hover:text-fg">
-              <ChevronRight size={12} className="transition-transform group-open/adv:rotate-90" /> Avancé
+              <ChevronRight size={12} className="transition-transform group-open/adv:rotate-90" /> Advanced
             </summary>
             <div className="mt-3 space-y-3">{advanced.map((s) => control(s, `x:${s.key}`))}</div>
           </details>
         )}
         <p className="pt-1 text-[10px] leading-snug text-muted">
-          Réglages lus sur le schéma publié par fal pour cet endpoint{refsWired ? " (mode avec image de référence)" : ""}.
+          Settings read from the schema fal publishes for this endpoint{refsWired ? " (reference image mode)" : ""}.
         </p>
       </div>
 
@@ -361,23 +361,23 @@ function ModelInspector({ node }: { node: FlowNode }) {
           </div>
         </div>
         <div className="flex items-center justify-between text-xs">
-          <span className="text-muted">Coût estimé</span>
+          <span className="text-muted">Estimated cost</span>
           <span
             className="tabular-nums"
             title={
               rate != null
-                ? "Prix par seconde × durée de la vidéo source. Refaire un segment coûte sa durée."
+                ? "Price per second × length of the source video. Redoing a segment costs its length."
                 : tokens
-                  ? `${Math.round(tokens.tokens).toLocaleString("fr-FR")} tokens en ${tokens.resolution} (largeur × hauteur × 24 × durée / 1024). Le son ne change pas le prix.`
+                  ? `${Math.round(tokens.tokens).toLocaleString("en-US")} tokens at ${tokens.resolution} (width × height × 24 × duration / 1024). Sound doesn't change the price.`
                   : undefined
             }
           >
             {tokens
-              ? `${money(tokens.cost * runs, currency)}${tokens.auto ? ` (durée auto : ${tokens.seconds} s)` : ""}`
+              ? `${money(tokens.cost * runs, currency)}${tokens.auto ? ` (auto duration: ${tokens.seconds} s)` : ""}`
               : rate != null
               ? duration != null
                 ? `${money(rate * duration * runs, currency)} (${Math.round(duration)} s)`
-                : `${money(rate, currency)} / s de vidéo`
+                : `${money(rate, currency)} / s of video`
               : price?.unitPrice == null
               ? "—"
               : perRun
@@ -389,16 +389,16 @@ function ModelInspector({ node }: { node: FlowNode }) {
           <button
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-red-500/50 py-2 text-[13px] font-medium text-red-300 hover:bg-red-500/10"
             onClick={() => stop([id])}
-            title="Arrête ce nœud et annule sa requête fal"
+            title="Stops this node and cancels its request"
           >
-            <Square size={12} fill="currentColor" /> Arrêter{progress !== null && runs > 1 ? ` (run ${progress}/${runs})` : ""}
+            <Square size={12} fill="currentColor" /> Stop{progress !== null && runs > 1 ? ` (run ${progress}/${runs})` : ""}
           </button>
         ) : (
           <button className="flex w-full items-center justify-center gap-2 rounded-lg bg-fg py-2 text-[13px] font-medium text-bg" onClick={runRepeated}>
-            <ArrowRight size={14} /> Exécuter{runs > 1 ? ` ×${runs}` : ""}
+            <ArrowRight size={14} /> Run{runs > 1 ? ` ×${runs}` : ""}
           </button>
         )}
-        {runs > 1 && <p className="text-[10px] leading-snug text-muted">Chaque run s&apos;ajoute à l&apos;historique du nœud (‹ › sur l&apos;image).</p>}
+        {runs > 1 && <p className="text-[10px] leading-snug text-muted">Each run is added to the node&apos;s history (‹ › on the image).</p>}
       </footer>
     </aside>
   );

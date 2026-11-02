@@ -16,7 +16,7 @@ interface Size {
 }
 
 export const ASPECTS: [string, string][] = [
-  ["free", "Libre"],
+  ["free", "Free"],
   ["1:1", "1:1"],
   ["16:9", "16:9"],
   ["9:16", "9:16"],
@@ -233,9 +233,9 @@ export default function CropEditor({
         <button
           className="nodrag shrink-0 rounded-lg px-2 py-1.5 text-[12px] text-muted hover:bg-panel-2 hover:text-fg"
           onClick={() => size && save(fullBox(size, ratio))}
-          title="Le plus grand cadre de ce format, centré"
+          title="The largest frame of this ratio, centered"
         >
-          Réinitialiser
+          Reset
         </button>
       </div>
 
@@ -260,7 +260,7 @@ export default function CropEditor({
         <button
           className="nodrag grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-panel-2 hover:text-fg"
           onClick={swap}
-          title="Inverser l'orientation (portrait ↔ paysage)"
+          title="Swap orientation (portrait ↔ landscape)"
         >
           <ArrowLeftRight size={14} />
         </button>

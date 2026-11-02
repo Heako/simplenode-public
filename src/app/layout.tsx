@@ -3,12 +3,12 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "SimpleNode",
-  description: "Canvas à nœuds pour la génération IA",
+  description: "Node-based canvas for AI generation",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="fr">
+    <html lang="en">
       <body className="antialiased">{children}</body>
     </html>
   );

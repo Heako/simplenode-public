@@ -106,7 +106,7 @@ pub fn status(app: &AppHandle) -> McpStatus {
 /// Saves the settings and starts, restarts or stops the server to match.
 pub async fn configure(app: &AppHandle, config: McpConfig) -> Result<McpStatus> {
     if config.port < 1024 {
-        return Err(AppError::Invalid("Port invalide : choisissez-en un au-dessus de 1024".into()));
+        return Err(AppError::Invalid("Invalid port: choose one above 1024".into()));
     }
     save(app, &config)?;
     apply(app).await;
@@ -131,7 +131,7 @@ pub async fn apply(app: &AppHandle) {
     let listener = match tokio::net::TcpListener::bind(("127.0.0.1", config.port)).await {
         Ok(l) => l,
         Err(e) => {
-            *last_error().lock().unwrap() = Some(format!("Port {} indisponible : {e}", config.port));
+            *last_error().lock().unwrap() = Some(format!("Port {} unavailable: {e}", config.port));
             return;
         }
     };
@@ -175,7 +175,7 @@ async fn handle(State(state): State<AppState>, headers: HeaderMap, Json(body): J
         .and_then(|v| v.strip_prefix("Bearer "))
         .is_some_and(|t| t == state.token);
     if !authorized || !origin_allowed(&headers) {
-        return (StatusCode::UNAUTHORIZED, "Jeton MCP invalide").into_response();
+        return (StatusCode::UNAUTHORIZED, "Invalid MCP token").into_response();
     }
     match body {
         Value::Array(batch) => {
@@ -222,7 +222,7 @@ async fn respond(app: &AppHandle, message: Value) -> Option<Value> {
             };
             Ok(json!({ "content": [{ "type": "text", "text": text }], "isError": is_error }))
         }
-        other => Err(json!({ "code": -32601, "message": format!("Méthode inconnue : {other}") })),
+        other => Err(json!({ "code": -32601, "message": format!("Unknown method: {other}") })),
     };
     Some(match result {
         Ok(result) => json!({ "jsonrpc": "2.0", "id": id, "result": result }),
@@ -249,7 +249,7 @@ struct Request {
 
 async fn call(app: &AppHandle, tool: &str, args: Value) -> Answer {
     if !tools().iter().any(|t| t["name"] == tool) {
-        return Err(format!("Outil inconnu : {tool}"));
+        return Err(format!("Unknown tool: {tool}"));
     }
     static NEXT: AtomicU64 = AtomicU64::new(1);
     let id = NEXT.fetch_add(1, Ordering::Relaxed);
@@ -257,13 +257,13 @@ async fn call(app: &AppHandle, tool: &str, args: Value) -> Answer {
     pending().lock().unwrap().insert(id, tx);
     if app.emit("mcp-request", Request { id, tool: tool.to_owned(), args }).is_err() {
         pending().lock().unwrap().remove(&id);
-        return Err("SimpleNode n'a pas pu transmettre la demande à sa fenêtre".into());
+        return Err("SimpleNode could not pass the request to its window".into());
     }
     match tokio::time::timeout(CALL_TIMEOUT, rx).await {
         Ok(Ok(answer)) => answer,
         _ => {
             pending().lock().unwrap().remove(&id);
-            Err("Pas de réponse de la fenêtre SimpleNode : est-elle ouverte ?".into())
+            Err("No answer from the SimpleNode window: is it open?".into())
         }
     }
 }
@@ -360,7 +360,7 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "estimate_cost",
-            "Estimated fal cost of running a node (with the ancestors it needs) or the whole graph, and the budget left.",
+            "Estimated cost (fal or BytePlus) of running a node (with the ancestors it needs) or the whole graph, and the budget left.",
             json!({ "node_id": { "type": "string" } }),
             &[],
         ),
@@ -378,11 +378,17 @@ fn tools() -> Vec<Value> {
         ),
         tool(
             "finalize_draft",
-            "Renders a Seedance 2.5 Draft node's 480p draft as the same video in 1080p, and makes it the node's result. Waits for the video. Refused when its estimated cost exceeds the budget left, or once the draft expired (fal keeps it 14 days).",
+            "Renders a Seedance 2.5 draft (fal Seedance 2.5 Draft node, or a BytePlus Seedance 2.5 node run with draft=true) as the same video in 1080p, and makes it the node's result. Waits for the video. Refused when its estimated cost exceeds the budget left, or once the draft expired (kept 14 days).",
             json!({ "node_id": id }),
             &["node_id"],
         ),
-        tool("stop", "Stops a running node, or every one; their fal requests are cancelled.", json!({ "node_id": { "type": "string" } }), &[]),
+        tool(
+            "portrait_status",
+            "Review status of a BytePlus \"AI Portrait\" node (bpPortrait): Processing, Active or Failed, and its asset:// URI once Active. Asks BytePlus for the current status.",
+            json!({ "node_id": id }),
+            &["node_id"],
+        ),
+        tool("stop", "Stops a running node, or every one; their fal requests (and queued BytePlus tasks) are cancelled.", json!({ "node_id": { "type": "string" } }), &[]),
     ]
 }
 

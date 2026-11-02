@@ -84,7 +84,7 @@ fn tool(name: &str) -> Result<PathBuf> {
     dirs.chain(path_dirs)
         .map(|d| d.join(name))
         .find(|p| p.is_file())
-        .ok_or_else(|| AppError::Invalid(format!("{name} introuvable : installez-le avec « brew install ffmpeg »")))
+        .ok_or_else(|| AppError::Invalid(format!("{name} not found: install it with `brew install ffmpeg`")))
 }
 
 fn kind_of(value: &str) -> Result<Kind> {
@@ -94,7 +94,7 @@ fn kind_of(value: &str) -> Result<Kind> {
         Some("image") => Ok(Kind::Image),
         Some("video") => Ok(Kind::Video),
         Some("audio") => Ok(Kind::Audio),
-        _ => Err(AppError::Invalid(format!("Média non pris en charge par le compositeur : {value}"))),
+        _ => Err(AppError::Invalid(format!("Media not supported by the compositor: {value}"))),
     }
 }
 
@@ -106,7 +106,7 @@ async fn probe(value: &str) -> Result<Probe> {
         .output()
         .await?;
     if !out.status.success() {
-        return Err(AppError::Invalid(format!("Média illisible : {value}")));
+        return Err(AppError::Invalid(format!("Unreadable media: {value}")));
     }
     let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_default();
     let streams = json["streams"].as_array().cloned().unwrap_or_default();
@@ -323,7 +323,7 @@ fn plan(canvas: &Canvas, layers: &[(&Layer, Probe)], out: &Path) -> (Vec<String>
 pub async fn render(app: &AppHandle, canvas: &Canvas, layers: &[Layer]) -> Result<PathBuf> {
     let shown: Vec<&Layer> = layers.iter().filter(|l| !l.place.hidden).collect();
     if shown.is_empty() {
-        return Err(AppError::Invalid("Reliez au moins une image, une vidéo ou un son".into()));
+        return Err(AppError::Invalid("Connect at least one image, video or sound".into()));
     }
     let probes = try_join_all(shown.iter().map(|l| probe(&l.value))).await?;
     let pairs: Vec<(&Layer, Probe)> = shown.into_iter().zip(probes).collect();
@@ -336,7 +336,7 @@ pub async fn render(app: &AppHandle, canvas: &Canvas, layers: &[Layer]) -> Resul
         let _ = std::fs::remove_file(&out);
         let log = String::from_utf8_lossy(&result.stderr);
         let tail: Vec<&str> = log.lines().rev().take(3).collect();
-        return Err(AppError::Invalid(format!("ffmpeg : {}", tail.into_iter().rev().collect::<Vec<_>>().join(" "))));
+        return Err(AppError::Invalid(format!("ffmpeg: {}", tail.into_iter().rev().collect::<Vec<_>>().join(" "))));
     }
     Ok(out)
 }

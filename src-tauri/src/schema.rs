@@ -76,7 +76,7 @@ pub async fn settings(http: &Client, endpoint: &str) -> Result<Vec<Setting>> {
     }
     let res = http.get(SCHEMA_URL).query(&[("endpoint_id", endpoint)]).send().await?;
     if !res.status().is_success() {
-        return Err(AppError::Fal(format!("schéma introuvable pour {endpoint}")));
+        return Err(AppError::Fal(format!("schema not found for {endpoint}")));
     }
     let parsed = parse(&res.json().await?);
     cache().lock().unwrap().insert(endpoint.to_owned(), parsed.clone());
