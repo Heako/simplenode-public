@@ -3,11 +3,12 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Check, Coffee, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
+import { Bot, Check, Coffee, Copy, Eye, EyeOff, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import ProviderIcon from "./ProviderIcon";
 import { useModels } from "@/lib/spec";
 import { perSecondRows } from "@/lib/cost";
+import { useMcpSpend, type McpStatus } from "@/lib/mcp";
 
 type KeyKind = "main" | "billing";
 
@@ -427,6 +428,171 @@ function AboutSection() {
   );
 }
 
+function McpSection() {
+  const [status, setStatus] = useState<McpStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [shown, setShown] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [client, setClient] = useState<"code" | "desktop">("code");
+  const { spent, reset } = useMcpSpend();
+  useEffect(() => {
+    invoke<McpStatus>("mcp_status").then(setStatus).catch((e) => setError(String(e)));
+  }, []);
+  if (!status) return null;
+
+  const configure = (patch: Partial<McpStatus>) => {
+    const { enabled, port, token, budget } = { ...status, ...patch };
+    setError(null);
+    invoke<McpStatus>("mcp_configure", { config: { enabled, port, token, budget } })
+      .then(setStatus)
+      .catch((e) => setError(String(e)));
+  };
+  const url = `http://127.0.0.1:${status.port}/mcp`;
+  const command = (token: string) =>
+    client === "code"
+      ? `claude mcp add --scope user --transport http simplenode ${url} --header "Authorization: Bearer ${token}"`
+      : // The desktop app only starts local (stdio) servers: mcp-remote relays to this one.
+        JSON.stringify(
+          {
+            mcpServers: {
+              simplenode: {
+                command: "npx",
+                args: ["-y", "mcp-remote", url, "--allow-http", "--header", "Authorization:${AUTH_HEADER}"],
+                env: { AUTH_HEADER: `Bearer ${token}` },
+              },
+            },
+          },
+          null,
+          2,
+        );
+  const field = "w-24 rounded-md border border-line bg-panel-2 px-2 py-1 text-[12px] text-fg outline-none focus:border-accent tabular-nums";
+
+  return (
+    <Section
+      id="mcp"
+      icon={Bot}
+      title="MCP"
+      description="Laissez Claude Code piloter SimpleNode : créer des projets, ajouter et relier des nœuds, lancer des générations et récupérer les résultats."
+    >
+      <div className="space-y-4 text-[12px]">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={status.enabled} onChange={(e) => configure({ enabled: e.target.checked })} />
+          Activer le serveur MCP
+          <span className={`ml-auto text-[11px] ${status.running ? "text-emerald-400" : "text-muted"}`}>
+            {status.running ? `En écoute sur 127.0.0.1:${status.port}` : "Arrêté"}
+          </span>
+        </label>
+        {(error || status.error) && <p className="rounded-md bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">{error || status.error}</p>}
+
+        <div className="space-y-1.5">
+          <div className="flex gap-1">
+            {(
+              [
+                ["code", "Claude Code"],
+                ["desktop", "Claude (app de bureau)"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                className={`rounded-md px-2.5 py-1 ${client === id ? "bg-panel-2 text-fg" : "text-muted hover:text-fg"}`}
+                onClick={() => setClient(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          {client === "code" ? (
+            <p className="text-muted">Dans un Terminal, une seule fois :</p>
+          ) : (
+            <p className="text-muted">
+              Dans Claude : Réglages → Développeur → Modifier la config. Ajoutez ce bloc dans <code>claude_desktop_config.json</code> (dans
+              « mcpServers » s&apos;il existe déjà), puis quittez et relancez Claude. Demande Node.js (npx).
+            </p>
+          )}
+          <div className="flex items-start gap-2">
+            <code className="min-w-0 flex-1 rounded-md bg-panel-2 px-2.5 py-2 font-mono text-[11px] break-all whitespace-pre-wrap">
+              {command(shown ? status.token : "•".repeat(12))}
+            </code>
+            <div className="flex shrink-0 flex-col gap-1">
+              <button
+                className="flex items-center gap-1 rounded-md border border-line px-2 py-1 hover:border-accent"
+                onClick={() => {
+                  navigator.clipboard.writeText(command(status.token)).then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 1500);
+                  });
+                }}
+              >
+                {copied ? <Check size={12} /> : <Copy size={12} />} {copied ? "Copié" : "Copier"}
+              </button>
+              <button className="flex items-center gap-1 rounded-md px-2 py-1 text-muted hover:text-fg" onClick={() => setShown(!shown)}>
+                {shown ? <EyeOff size={12} /> : <Eye size={12} />} {shown ? "Masquer" : "Afficher"}
+              </button>
+            </div>
+          </div>
+          <p className="text-[11px] text-muted">
+            « Ajouter un connecteur personnalisé » dans Claude ne convient pas : ces connecteurs passent par les serveurs d&apos;Anthropic et ne
+            peuvent pas joindre une app sur votre Mac. SimpleNode doit être ouvert pendant que Claude s&apos;en sert. Le jeton donne le contrôle de l&apos;app : ne le partagez pas.{" "}
+            <button
+              className="text-accent hover:underline"
+              onClick={() =>
+                invoke<McpStatus>("mcp_regenerate_token")
+                  .then(setStatus)
+                  .catch((e) => setError(String(e)))
+              }
+            >
+              Changer de jeton
+            </button>{" "}
+            (il faudra relancer la commande).
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-line pt-3">
+          <label className="flex items-center gap-2">
+            Plafond de dépenses par session ($)
+            <input
+              type="number"
+              min={0}
+              step={1}
+              className={field}
+              defaultValue={status.budget}
+              key={status.budget}
+              onBlur={(e) => {
+                const budget = Math.max(0, Number(e.target.value) || 0);
+                if (budget !== status.budget) configure({ budget });
+              }}
+            />
+          </label>
+          <label className="flex items-center gap-2">
+            Port
+            <input
+              type="number"
+              min={1024}
+              max={65535}
+              className={field}
+              defaultValue={status.port}
+              key={status.port}
+              onBlur={(e) => {
+                const port = Number(e.target.value);
+                if (port && port !== status.port) configure({ port });
+              }}
+            />
+          </label>
+        </div>
+        <p className="text-[11px] text-muted">
+          Lancé par Claude Code depuis l&apos;ouverture de l&apos;app (estimation) : <span className="text-fg tabular-nums">${spent.toFixed(2)}</span> sur $
+          {status.budget.toFixed(2)}.{" "}
+          <button className="text-accent hover:underline" onClick={reset}>
+            Remettre à zéro
+          </button>
+          . Au-delà du plafond, l&apos;app refuse de lancer et Claude Code doit vous demander. Une génération dont le coût ne peut pas être estimé est
+          toujours refusée.
+        </p>
+      </div>
+    </Section>
+  );
+}
+
 function CoffeeSection() {
   return (
     <Section id="coffee" icon={Coffee} title="Buy me a coffee" description="SimpleNode est gratuit. Si l'app vous rend service, vous pouvez soutenir son développement.">
@@ -445,6 +611,7 @@ const SECTIONS: [string, string][] = [
   ["keys", "Clé API"],
   ["costs", "Coûts"],
   ["storage", "Stockage"],
+  ["mcp", "MCP"],
   ["about", "À propos"],
   ["coffee", "Buy me a coffee"],
 ];
@@ -463,6 +630,7 @@ export default function Settings() {
         <KeysSection />
         <CostsSection />
         <StorageSection />
+        <McpSection />
         <AboutSection />
         <CoffeeSection />
       </div>

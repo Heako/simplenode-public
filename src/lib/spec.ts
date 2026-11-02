@@ -78,6 +78,8 @@ export interface NodeData extends Record<string, unknown> {
   title?: string;
   /** Image chosen as the project's cover on the home page. */
   cover?: string;
+  /** A Seedance draft being rendered in 1080p (src/lib/draft.ts). */
+  finalizing?: boolean;
 }
 
 export const PORT_COLORS: Record<PortType, string> = {

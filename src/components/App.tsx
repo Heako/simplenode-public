@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useEffect, useState } from "react";
 import { useFlow } from "@/lib/store";
 import { useModels } from "@/lib/spec";
+import { listenToMcp } from "@/lib/mcp";
 import Editor from "./Editor";
 import Home from "./Home";
 import Welcome from "./Welcome";
@@ -22,6 +23,12 @@ export default function App() {
       .then((s) => setWelcome(!s.main))
       .catch(() => setWelcome(false));
   }, [loadModels]);
+
+  // Tool calls from Claude Code, when the MCP server is on (Settings → MCP).
+  useEffect(() => {
+    const unlisten = listenToMcp();
+    return () => void unlisten.then((stop) => stop());
+  }, []);
 
   if (welcome === null) return null;
   if (welcome) return <Welcome onDone={() => setWelcome(false)} />;

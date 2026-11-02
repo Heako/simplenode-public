@@ -1,7 +1,9 @@
 "use client";
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { ask, open, save } from "@tauri-apps/plugin-dialog";
+import { dollars } from "@/lib/cost";
+import { DRAFT_DAYS, dayMonth, draftExpired, draftExpiry, finalizeDraft, finalizeEstimate } from "@/lib/draft";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { Handle, NodeResizer, Position, useNodeId, useUpdateNodeInternals, useStore as useFlowStore, type NodeProps } from "@xyflow/react";
 import {
@@ -746,24 +748,27 @@ export function ModelNode(props: NodeProps<FlowNode>) {
   const isLlm = model?.category === "llm";
   const isVideo = model?.category === "video";
   const isAudio = model?.category === "audio";
-  const patchNode = useFlow((s) => s.patchNode);
   const running = useRunning(id);
-  const [finalizing, setFinalizing] = useState(false);
   const pickHistory = useFlow((s) => s.pickHistory);
   const draftId = data.outputs.draftId;
+  // Set while a draft renders in 1080p, from the button or from Claude Code (MCP).
+  const finalizing = !!data.finalizing;
+  const finalCost = draftId ? finalizeEstimate(data) : null;
+  const expiry = draftId ? draftExpiry(data) : null;
+  const expired = draftId ? draftExpired(data) : false;
 
   async function finalize() {
-    setFinalizing(true);
-    patchNode(id, { error: undefined });
-    try {
-      const video = await invoke<string>("finalize_draft", { draftId });
-      // Drop draftId: a finalized draft can't be finalized again.
-      patchNode(id, { outputs: { video }, status: "done", history: [...(data.history ?? []), video] });
-    } catch (err) {
-      patchNode(id, { error: String(err) });
-    } finally {
-      setFinalizing(false);
-    }
+    const price = finalCost
+      ? `Coût estimé : ~${dollars(finalCost.cost)}${finalCost.auto ? ` (durée « auto » : estimée sur ${finalCost.seconds} s)` : ""}, facturé par fal.`
+      : "Coût non estimable.";
+    const ok = await ask(`Rendre ce brouillon en 1080p ?\n\n${price}`, {
+      title: "Finaliser en 1080p",
+      kind: "warning",
+      okLabel: "Finaliser",
+      cancelLabel: "Annuler",
+    });
+    // Errors are shown on the node.
+    if (ok) finalizeDraft(id).catch(() => {});
   }
 
   return (
@@ -789,14 +794,17 @@ export function ModelNode(props: NodeProps<FlowNode>) {
           />
           {draftId && (
             <div className="flex items-center gap-2">
-              <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-300">Brouillon 480p</span>
+              <span className={`rounded px-1.5 py-0.5 text-[10px] ${expired ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`}>
+                {expired ? "Brouillon expiré" : "Brouillon 480p"}
+                {expiry && ` · ${expired ? "le" : "expire le"} ${dayMonth(expiry)}`}
+              </span>
               <button
                 className="nodrag ml-auto rounded-lg bg-fg px-2.5 py-1.5 text-[11px] font-medium text-bg disabled:opacity-50"
-                disabled={finalizing || running}
+                disabled={finalizing || running || expired}
                 onClick={finalize}
-                title="Rend la même vidéo en 1080p (brouillon valable 7 jours)"
+                title={`Rend la même vidéo en 1080p. fal garde le brouillon ${DRAFT_DAYS} jours, et seulement pour le compte fal qui l'a généré.`}
               >
-                {finalizing ? "Finalisation…" : "Finaliser en 1080p"}
+                {finalizing ? "Finalisation…" : `Finaliser en 1080p${finalCost ? ` (~${dollars(finalCost.cost)})` : ""}`}
               </button>
             </div>
           )}

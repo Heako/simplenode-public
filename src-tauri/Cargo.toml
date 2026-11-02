@@ -1,6 +1,6 @@
 [package]
 name = "simplenode"
-version = "0.2.2"
+version = "0.3.0"
 description = "Canvas à nœuds pour la génération IA"
 edition = "2021"
 rust-version = "1.77.2"
@@ -21,10 +21,11 @@ tauri-plugin-log = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
-tokio = { version = "1", features = ["time", "fs", "sync", "process"] }
+tokio = { version = "1", features = ["time", "fs", "sync", "process", "net"] }
 futures = "0.3"
 keyring = { version = "3", features = ["apple-native", "windows-native", "linux-native"] }
 base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 thiserror = "2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }

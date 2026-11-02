@@ -30,7 +30,7 @@ xattr -dr com.apple.quarantine /Applications/SimpleNode.app
 
 - **Canvas à nœuds** : glisser-déposer depuis la bibliothèque, clic droit pour ajouter un nœud, annuler / rétablir, liens colorés selon le type (texte, image, vidéo).
 - **Nœuds** : Prompt, Import (image ou vidéo), Preview, Router, Prompt Concatenator, Crop, Prompt Enhancer, Image Describer, Video Describer, LLM.
-- **Modèles d'image** : Nano Banana Pro / 2, Seedream 5.0 Lite / 4.5, GPT Image 2, FLUX.2 [pro], FLUX.1 Kontext [pro], Qwen Image Max, Recraft V4 Pro, Ideogram V3, FLUX.1 [schnell]. Avec des images reliées en référence, l'app utilise la version « édition » du modèle.
+- **Modèles d'image** : Nano Banana Pro / 2, Seedream 5.0 Lite / 4.5, GPT Image 2, FLUX.2 [pro], FLUX.1 Kontext [pro], Qwen Image 3, Recraft V4 Pro, Ideogram V3, FLUX.1 [schnell]. Avec des images reliées en référence, l'app utilise la version « édition » du modèle.
 - **Modèles vidéo** : Kling 4 / 3 Pro / 2.5 Turbo Pro, MiniMax H3 / H3 Max, Seedance 2.5 / 2.0 / 1.0 Pro, Veo 3.1 / 3.1 Fast, Hailuo 02, Wan 2.5, LTX-2. Image de départ et de fin selon le modèle.
 - **Recast** : à partir d'une vidéo source et d'une image de personnage, deux modes. **Remplacer** garde la scène, la lumière, la caméra et le son, et remplace les personnes par vos personnages (H3 Max Recast, jusqu'à 4 personnages ; Wan 2.2 Animate Replace). **Mouvement** anime votre personnage, dans son propre décor, avec les gestes et la caméra de la vidéo (Kling 3 Motion Control Pro / Standard).
 - **Musique et son** : musique (ElevenLabs Music, Stable Audio 2.5), bruitages (ElevenLabs Sound Effects, MMAudio), son généré pour une vidéo (MMAudio), et « Ajouter le son » pour poser une piste sur une vidéo.

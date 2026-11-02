@@ -250,15 +250,34 @@ pub async fn prices(http: &Client) -> Result<Vec<PriceRow>> {
     }
 
     let mut found: HashMap<String, (f64, String, String)> = HashMap::new();
+    let mut prices = Vec::new();
     for chunk in rows.chunks(PRICING_BATCH) {
         let query: Vec<(&str, String)> = chunk.iter().map(|r| ("endpoint_id", r.endpoint.clone())).collect();
-        let body = platform_get(http, &key, "/models/pricing", &query).await?;
-        for p in body["prices"].as_array().into_iter().flatten() {
-            if let (Some(id), Some(price)) = (p["endpoint_id"].as_str(), p["unit_price"].as_f64()) {
-                let unit = p["unit"].as_str().unwrap_or_default().to_owned();
-                let currency = p["currency"].as_str().unwrap_or("USD").to_owned();
-                found.insert(id.to_owned(), (price, unit, currency));
+        match platform_get(http, &key, "/models/pricing", &query).await {
+            Ok(body) => prices.extend(body["prices"].as_array().cloned().unwrap_or_default()),
+            // fal refuses the whole batch when one endpoint is gone (a
+            // retired model): ask one by one, so it only hides its own price.
+            Err(batch_error) => {
+                let key = &key;
+                let single = chunk.iter().map(|r| {
+                    let query = [("endpoint_id", r.endpoint.clone())];
+                    async move { platform_get(http, key, "/models/pricing", &query).await }
+                });
+                let answers: Vec<_> = futures::future::join_all(single).await.into_iter().filter_map(|a| a.ok()).collect();
+                if answers.is_empty() {
+                    return Err(batch_error);
+                }
+                for body in answers {
+                    prices.extend(body["prices"].as_array().cloned().unwrap_or_default());
+                }
             }
+        }
+    }
+    for p in &prices {
+        if let (Some(id), Some(price)) = (p["endpoint_id"].as_str(), p["unit_price"].as_f64()) {
+            let unit = p["unit"].as_str().unwrap_or_default().to_owned();
+            let currency = p["currency"].as_str().unwrap_or("USD").to_owned();
+            found.insert(id.to_owned(), (price, unit, currency));
         }
     }
     for row in &mut rows {

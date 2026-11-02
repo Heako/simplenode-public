@@ -40,6 +40,56 @@ export function perSecondRows<T extends Price>(rows: T[]): T[] {
   });
 }
 
+/**
+ * Seedance 2.5 (and its Draft mode) is billed per 1000 video tokens, with
+ * fal's formula: tokens = width × height × 24 × seconds / 1024. The sound
+ * doesn't change the price. Surfaces are the same in portrait and landscape.
+ */
+const SEEDANCE_SURFACES: Record<string, number> = { "480p": 864 * 496, "720p": 1280 * 720, "1080p": 1920 * 1080 };
+/** Used when the duration is "auto": the longest a clip may last. */
+export const SEEDANCE_AUTO_SECONDS = 15;
+/** fal's price per 1000 tokens (November 2026), when the price list isn't loaded. */
+const SEEDANCE_PRICE_PER_1K = 0.0214;
+
+export function isSeedance25(modelId: string | undefined) {
+  return modelId === "seedance-2.5" || modelId === "seedance-2.5-draft";
+}
+
+export interface SeedanceEstimate {
+  cost: number;
+  tokens: number;
+  seconds: number;
+  /** The duration was "auto": estimated on SEEDANCE_AUTO_SECONDS. */
+  auto: boolean;
+  resolution: string;
+}
+
+/**
+ * Cost of one Seedance 2.5 render. The Draft always renders in 480p;
+ * `resolution` overrides it, as finalizing a draft renders in 1080p.
+ * `price` is fal's row for the endpoint, when loaded.
+ */
+export function seedanceEstimate(
+  modelId: string | undefined,
+  params: Record<string, string>,
+  { resolution, price }: { resolution?: string; price?: Price } = {},
+): SeedanceEstimate | null {
+  if (!isSeedance25(modelId)) return null;
+  const res = resolution ?? (modelId === "seedance-2.5-draft" ? "480p" : params.resolution || "720p");
+  const surface = SEEDANCE_SURFACES[res];
+  const auto = !params.duration || params.duration === "auto";
+  const seconds = auto ? SEEDANCE_AUTO_SECONDS : Number(params.duration);
+  if (!surface || !(seconds > 0)) return null;
+  const tokens = (surface * 24 * seconds) / 1024;
+  const per1k = price?.unit === "1000 tokens" && price.unitPrice != null ? price.unitPrice : SEEDANCE_PRICE_PER_1K;
+  return { cost: (tokens / 1000) * per1k, tokens, seconds, auto, resolution: res };
+}
+
+/** "16,50 $" */
+export function dollars(value: number) {
+  return `${value.toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} $`;
+}
+
 /** Duration in seconds of a local or remote video, once its metadata loads. */
 export function useVideoDuration(value: string | undefined): number | null {
   const [duration, setDuration] = useState<{ value: string; seconds: number } | null>(null);

@@ -151,6 +151,16 @@ interface FlowState {
  * The selected nodes (or `id` when it isn't selected) with their links: those
  * between them, and those coming in from other nodes.
  */
+/** Models fal retired, and the registry model that replaces each. */
+const RENAMED_MODELS: Record<string, string> = { "qwen-image-max": "qwen-image-3" };
+
+function renameModels(nodes: FlowNode[]): FlowNode[] {
+  return nodes.map((n) => {
+    const to = n.data.kind === "model" ? RENAMED_MODELS[n.data.params.modelId] : undefined;
+    return to ? { ...n, data: { ...n.data, params: { ...n.data.params, modelId: to } } } : n;
+  });
+}
+
 /**
  * Projects saved before numbered reference inputs: the edges into a model's
  * single `refs` input become Image 1, Image 2… in the order they were made.
@@ -600,7 +610,7 @@ export const useFlow = create<FlowState>()((set, get) => ({
   },
 
   openProject: ({ id, title, trashed, ...graph }) => {
-    const { nodes, edges } = numberRefs(graph.nodes, graph.edges);
+    const { nodes, edges } = numberRefs(renameModels(graph.nodes), graph.edges);
     set({ projectId: id, title, trashed, nodes: propagate(nodes, edges), edges, past: [], future: [], notice: null });
   },
 

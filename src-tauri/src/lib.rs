@@ -4,6 +4,7 @@ mod compose;
 mod error;
 mod fal;
 mod graph;
+mod mcp;
 mod models;
 mod projects;
 mod recast;
@@ -39,7 +40,11 @@ async fn test_fal_key(state: State<'_, AppState>, kind: KeyKind) -> Result<()> {
 
 #[tauri::command]
 async fn model_prices(state: State<'_, AppState>) -> Result<Vec<account::PriceRow>> {
-    account::prices(&state.http).await
+    let prices = account::prices(&state.http).await;
+    if let Err(e) = &prices {
+        log::warn!("model_prices: {e}");
+    }
+    prices
 }
 
 #[tauri::command]
@@ -138,6 +143,27 @@ async fn crop_image(app: AppHandle, value: String, params: std::collections::Has
     .map_err(|e| error::AppError::Invalid(format!("Recadrage interrompu : {e}")))?
 }
 
+#[tauri::command]
+fn mcp_status(app: AppHandle) -> mcp::McpStatus {
+    mcp::status(&app)
+}
+
+#[tauri::command]
+async fn mcp_configure(app: AppHandle, config: mcp::McpConfig) -> Result<mcp::McpStatus> {
+    mcp::configure(&app, config).await
+}
+
+#[tauri::command]
+async fn mcp_regenerate_token(app: AppHandle) -> Result<mcp::McpStatus> {
+    mcp::regenerate_token(&app).await
+}
+
+/// The window's answer to an MCP tool call.
+#[tauri::command]
+fn mcp_reply(id: u64, ok: bool, result: serde_json::Value) {
+    mcp::reply(id, ok, result);
+}
+
 /// Stops the given nodes, or all running ones; their fal requests are cancelled.
 #[tauri::command]
 fn stop_nodes(ids: Option<Vec<String>>) {
@@ -160,6 +186,9 @@ pub fn run() {
         .manage(AppState { http: reqwest::Client::new() })
         .setup(|app| {
             account::init(tauri::Manager::path(app).app_config_dir()?);
+            // The MCP server, when enabled in Settings.
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move { mcp::apply(&handle).await });
             if cfg!(debug_assertions) {
                 app.handle().plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())?;
             }
@@ -187,6 +216,10 @@ pub fn run() {
             run_graph,
             stop_nodes,
             crop_image,
+            mcp_status,
+            mcp_configure,
+            mcp_regenerate_token,
+            mcp_reply,
             finalize_draft
         ])
         .run(tauri::generate_context!())

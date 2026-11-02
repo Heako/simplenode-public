@@ -13,7 +13,7 @@ const MODEL_LOGOS: Record<string, { file: string; mono?: boolean }> = {
   "flux-2-pro": { file: "flux", mono: true },
   "flux-kontext-pro": { file: "flux", mono: true },
   "flux-schnell": { file: "flux", mono: true },
-  "qwen-image-max": { file: "qwen-color" },
+  "qwen-image-3": { file: "qwen-color" },
   "recraft-v4-pro": { file: "recraft", mono: true },
   "ideogram-v3": { file: "ideogram", mono: true },
   "kling-4": { file: "kling-color" },

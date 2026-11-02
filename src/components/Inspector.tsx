@@ -8,7 +8,7 @@ import { create } from "zustand";
 import { hasHistory, useFlow, useRunning, type FlowNode } from "@/lib/store";
 import { findModel, isRefPort, useModels } from "@/lib/spec";
 import { isAdvanced, optionLabel, settingLabel } from "@/lib/settingLabels";
-import { perSecond, useVideoDuration } from "@/lib/cost";
+import { perSecond, seedanceEstimate, useVideoDuration } from "@/lib/cost";
 import ProviderIcon from "./ProviderIcon";
 
 /** Mirrors `schema::Setting` in src-tauri. */
@@ -267,6 +267,8 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const price = prices?.find((p) => p.endpoint === endpoint);
   const perRun = price?.unitPrice != null && price.unit && PER_RUN_UNITS.has(price.unit);
   const rate = data.kind === "recast" ? perSecond(price, data.params.resolution) : null;
+  // Seedance 2.5 is billed in video tokens, from its resolution and duration.
+  const tokens = seedanceEstimate(model.id, data.params, { price });
   const currency = price?.currency ?? "USD";
   const control = (s: Shown, key: string) => (
     <div key={s.key} className={s.onlyIn ? "opacity-60" : undefined} title={s.onlyIn ? "Appliqué seulement dans ce mode" : undefined}>
@@ -360,8 +362,19 @@ function ModelInspector({ node }: { node: FlowNode }) {
         </div>
         <div className="flex items-center justify-between text-xs">
           <span className="text-muted">Coût estimé</span>
-          <span className="tabular-nums" title={rate != null ? "Prix par seconde × durée de la vidéo source. Refaire un segment coûte sa durée." : undefined}>
-            {rate != null
+          <span
+            className="tabular-nums"
+            title={
+              rate != null
+                ? "Prix par seconde × durée de la vidéo source. Refaire un segment coûte sa durée."
+                : tokens
+                  ? `${Math.round(tokens.tokens).toLocaleString("fr-FR")} tokens en ${tokens.resolution} (largeur × hauteur × 24 × durée / 1024). Le son ne change pas le prix.`
+                  : undefined
+            }
+          >
+            {tokens
+              ? `${money(tokens.cost * runs, currency)}${tokens.auto ? ` (durée auto : ${tokens.seconds} s)` : ""}`
+              : rate != null
               ? duration != null
                 ? `${money(rate * duration * runs, currency)} (${Math.round(duration)} s)`
                 : `${money(rate, currency)} / s de vidéo`

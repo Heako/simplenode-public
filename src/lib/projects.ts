@@ -45,6 +45,7 @@ export function persistableNodes(nodes: FlowNode[]): FlowNode[] {
     position,
     // Set only on nodes resized by hand; others size to their content.
     ...(width ? { width, height } : {}),
-    data: { ...data, status: data.status === "running" ? "idle" : data.status },
+    // A finalization doesn't survive closing the app.
+    data: { ...data, status: data.status === "running" ? "idle" : data.status, finalizing: undefined },
   }));
 }

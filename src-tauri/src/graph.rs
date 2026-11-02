@@ -552,6 +552,9 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                     out.insert("video".into(), path.to_string_lossy().into_owned());
                     if let Some(draft_id) = result.draft_id {
                         out.insert("draftId".into(), draft_id);
+                        // fal keeps a draft 14 days: the node shows when it expires.
+                        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+                        out.insert("draftAt".into(), now.as_millis().to_string());
                     }
                 }
                 Category::Image => {
