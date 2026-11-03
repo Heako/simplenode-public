@@ -122,39 +122,11 @@ function swapGraph() {
 }
 
 /**
- * A source video and a character into Seedance 2.5 with a reference video,
- * the way Higgsfield's Genjutsu works: `model` picks motion transfer or swap.
- */
-function seedanceVideoGraph(model: string, text: string) {
-  const video = node("image", 0, 0, { title: "Source video", params: { path: "", media: "video" } });
-  const character = imageImport(0, 330, "Character");
-  const instructions = prompt(0, 660, text);
-  const seedance = imageModel(420, 200, 1, model);
-  const preview = node("preview", 860, 200);
-  return {
-    nodes: [video, character, instructions, seedance, preview],
-    edges: [
-      link(video, "video", seedance, "media:video_urls", "video"),
-      link(character, "image", seedance, "ref1", "image"),
-      link(instructions, "text", seedance, "prompt", "text"),
-      link(seedance, "video", preview, "value", "video"),
-    ],
-  };
-}
-
-const MOTION_PROMPT =
-  "@Image1 performs the exact movements, gestures, timing and camera moves of @Video1. " +
-  "Keep the face, hair, body and outfit of @Image1 in every frame. Keep the setting and the lighting of @Video1.";
-
-const SWAP_PROMPT =
-  "Replace the person in @Video1 with the person in @Image1: their face, hair, skin tone and body. " +
-  "Keep everything else from @Video1 exactly: the movements and timing, the camera, the outfit, the background and the lighting.";
-
-/**
  * A video's action generated again with your character, without sending the
  * video: a vision LLM writes it as a timed prompt (Video → Prompt), a frame of
  * the video with your character put in it gives the setting and the start, and
- * Seedance 2.5 renders it from that image and a close-up of the face. Real
+ * Seedance 2.5 renders it from that image and the character's front, profile
+ * and full-body images. Real
  * faces in a reference video make Seedance keep them; here it never sees one.
  */
 function promptMotionGraph() {
@@ -256,24 +228,6 @@ export const WORKFLOWS: Workflow[] = [
     build: anglesGraph,
   },
   {
-    id: "seedance-swap",
-    category: "video",
-    title: "Swap a character (Seedance 2.5)",
-    description:
-      "Your character takes the place of the person in a 4–30 s video, in one take: same movements, camera, setting and light. Add more angles of your character (+ Image) for a closer likeness.",
-    steps: ["Import the source video (4–30 s)", "Import your character's image", "Run the model node: a 480p draft first, then finalize"],
-    build: () => seedanceVideoGraph("seedance-2.5-swap", SWAP_PROMPT),
-  },
-  {
-    id: "seedance-motion",
-    category: "video",
-    title: "Motion transfer (Seedance 2.5)",
-    description:
-      "Your character performs the movements of a 4–30 s video, in one take, with no cut into segments. Describe another setting in the prompt to change the scene.",
-    steps: ["Import the video with the motion (4–30 s)", "Import your character's image", "Run the model node: a 480p draft first, then finalize"],
-    build: () => seedanceVideoGraph("seedance-2.5-motion", MOTION_PROMPT),
-  },
-  {
     id: "prompt-motion",
     category: "video",
     title: "Recreate a video with your character (Seedance 2.5)",
@@ -292,15 +246,17 @@ export const WORKFLOWS: Workflow[] = [
     id: "recast-replace",
     category: "video",
     title: "Replace a character",
-    description: "Your character takes the place of the person on screen. The video's scene, lighting, camera and sound are kept.",
+    description:
+      "Your character takes the place of the person on screen; the video's scene, lighting, camera and sound are kept. Best on simple shots (talking, walking); fast or acrobatic moves, upside down especially, break the body.",
     steps: ["Import the source video", "Import your character's image", "Run the Recast node"],
     build: () => recastGraph("replace"),
   },
   {
     id: "recast-motion",
     category: "video",
-    title: "Motion transfer",
-    description: "Your character, in their own setting, performs the gestures and camera moves of the video.",
+    title: "Animate your character with a video's motion",
+    description:
+      "Your character, in their own setting, performs the gestures and camera moves of the video. Long videos are cut into segments that can drift, and hands don't always stay on objects: for the video's own setting, use Recreate a video instead.",
     steps: ["Import the reference video", "Import your character's image", "Run the Recast node"],
     build: () => recastGraph("motion"),
   },
