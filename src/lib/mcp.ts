@@ -7,11 +7,12 @@ import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { create } from "zustand";
 import { bpSeedanceEstimate, bpSeedreamCost, SEEDANCE_DURATIONS, SEEDANCE_RATIOS } from "./byteplus";
-import { perSecond, seedanceEstimate } from "./cost";
+import { isSeedanceReference, perSecond, seedanceEstimate } from "./cost";
 import { DRAFT_DAYS, FinalizeError, dayMonth, draftExpiry, draftProvider, finalizeDraft, finalizeEstimate } from "./draft";
 import { listProjects, loadProject, newProjectId, saveProject } from "./projects";
 import { findModel, isRefPort, libraryItems, portsFor, useModels, type NodeKind } from "./spec";
 import { useFlow, type FlowNode } from "./store";
+import { runsOnWaveSpeed, type KeyStatus } from "./provider";
 
 /** Mirrors `mcp::McpStatus` in src-tauri. */
 export interface McpStatus {
@@ -36,13 +37,14 @@ interface Price {
 }
 
 /** Same set as `graph::is_remote`: paid, and not re-run once they have a result. */
-const PAID = new Set<NodeKind>(["model", "enhancer", "describer", "videoDescriber", "angles", "recast", "addAudio", "bpPortrait", "bpSeedance", "bpSeedream"]);
+const PAID = new Set<NodeKind>(["model", "enhancer", "describer", "videoDescriber", "motionPrompt", "angles", "recast", "addAudio", "upscale", "bpPortrait", "bpSeedance", "bpSeedream"]);
 
 /** Settings of the BytePlus nodes, for list_node_types (they are not registry models). */
 const BYTEPLUS_SETTINGS: Partial<Record<NodeKind, { key: string; options: string[]; default: string; note?: string }[]>> = {
   bpPortrait: [
     { key: "name", options: [], default: "", note: "Portrait name in the library, e.g. \"Nora\"" },
     { key: "group", options: [], default: "SimpleNode", note: "Portrait group (created if missing)" },
+    { key: "existing", options: [], default: "", note: "asset://asset-… of a portrait already in the library (e.g. added in the BytePlus console): no upload, only its review is checked" },
   ],
   bpSeedance: [
     { key: "duration", options: SEEDANCE_DURATIONS.map(([v]) => v), default: "5", note: "-1 = auto" },
@@ -61,7 +63,7 @@ const BYTEPLUS_SETTINGS: Partial<Record<NodeKind, { key: string; options: string
 /** How the BytePlus nodes take their inputs, for list_node_types. */
 const BYTEPLUS_NOTES: Partial<Record<NodeKind, string>> = {
   bpPortrait:
-    "Uploads an AI character image (resembling no real person, no logo) to the BytePlus portrait library, then waits for the review. Output \"portrait\" = asset://… Needs the fal key (image hosting) and the BytePlus AK/SK.",
+    "Uploads an AI character image (resembling no real person, no logo) to the BytePlus portrait library, then waits for the review. Output \"portrait\" = asset://… Needs the fal key (image hosting) and the BytePlus AK/SK. With the \"existing\" param set, uses that portrait instead and needs no image. Uploading needs Advanced Creation Rights on the BytePlus account (the free Entry tier, after company verification, is enough).",
   bpSeedance:
     "Seedance 2.5 on BytePlus. Two exclusive modes: references (inputs portraits then refs; in the prompt, \"Image 1\", \"Image 2\"… in that order) OR start/end image (start, end). A realistic face is only accepted through a validated portrait or a BytePlus Seedream text-to-image output under 30 days old.",
   bpSeedream: "Seedream 5.0 on BytePlus. Without references, the output is a trusted input for Seedance (BytePlus) for 30 days.",
@@ -115,10 +117,27 @@ async function nodeCost(node: FlowNode): Promise<number | null> {
     case "enhancer":
     case "describer":
     case "videoDescriber":
+    case "motionPrompt":
     case "addAudio":
       return SMALL;
+    case "upscale": {
+      const source = inputValue(node.id, "video");
+      const seconds = source ? await mediaDuration(source) : null;
+      if (seconds == null) return null;
+      return invoke<number | null>("upscale_cost", { resolution: p.resolution ?? "1080p", quality: p.quality ?? "standard", seconds }).catch(() => null);
+    }
     case "recast": {
       const def = findModel(p.modelId);
+      const keys = await invoke<KeyStatus>("key_status").catch(() => null);
+      if (keys?.provider === "wavespeed") {
+        if (!def?.wavespeed) return null;
+        const source = inputValue(node.id, "video");
+        const seconds = source ? await mediaDuration(source) : null;
+        if (seconds == null) return null;
+        return invoke<{ cost: number }>("wavespeed_price", { modelId: def.id, edit: true, params: p, seconds })
+          .then((r) => r.cost)
+          .catch(() => null);
+      }
       const rate = perSecond(priceOf(def?.editEndpoint), p.resolution);
       const source = inputValue(node.id, "video");
       const seconds = source ? await mediaDuration(source) : null;
@@ -133,9 +152,18 @@ async function nodeCost(node: FlowNode): Promise<number | null> {
       if (!def) return null;
       if (def.category === "llm") return SMALL;
       const refs = useFlow.getState().edges.some((e) => e.target === node.id && isRefPort(e.targetHandle));
+      // On WaveSpeed: its exact price for these settings.
+      const keys = await invoke<KeyStatus>("key_status").catch(() => null);
+      if (runsOnWaveSpeed(keys, def.id)) {
+        return invoke<{ cost: number }>("wavespeed_price", { modelId: def.id, edit: refs, params: p })
+          .then((r) => r.cost)
+          .catch(() => null);
+      }
       const price = priceOf((refs ? def.editEndpoint : def.textEndpoint) ?? def.textEndpoint ?? def.editEndpoint);
       // Billed in video tokens; a duration "auto" is estimated on its longest.
-      const tokens = seedanceEstimate(def.id, p, { price });
+      const source = isSeedanceReference(def.id) ? inputValue(node.id, "media:video_urls") : undefined;
+      const inputSeconds = source ? await mediaDuration(source) : null;
+      const tokens = seedanceEstimate(def.id, p, { price, inputSeconds });
       if (tokens) return tokens.cost;
       if (price?.unitPrice == null || !price.unit) return null;
       if (PER_RUN_UNITS.has(price.unit)) return price.unitPrice * (Number(p["x:num_images"] || p.num_images) || 1);

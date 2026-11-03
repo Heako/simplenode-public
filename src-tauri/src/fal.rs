@@ -23,6 +23,7 @@ const SEEDANCE_DRAFT_COMPLETE_ENDPOINT: &str = "bytedance/seedance-2.5/draft/com
 pub const TRIM_VIDEO_ENDPOINT: &str = "fal-ai/workflow-utilities/trim-video";
 pub const MERGE_VIDEOS_ENDPOINT: &str = "fal-ai/ffmpeg-api/merge-videos";
 pub const MERGE_AUDIO_VIDEO_ENDPOINT: &str = "fal-ai/ffmpeg-api/merge-audio-video";
+pub const UPSCALE_VIDEO_ENDPOINT: &str = "fal-ai/bytedance-upscaler/upscale/video";
 
 /// What one model call sends besides the model's own params.
 pub struct ModelCall<'a> {
@@ -49,7 +50,8 @@ pub struct ModelOutput {
     pub draft_id: Option<String>,
 }
 const POLL_INTERVAL: Duration = Duration::from_millis(800);
-const TIMEOUT: Duration = Duration::from_secs(600);
+/// Video jobs can wait long in fal's queue when it is busy.
+const TIMEOUT: Duration = Duration::from_secs(1800);
 
 #[derive(Deserialize)]
 struct Submitted {
@@ -222,6 +224,15 @@ impl Fal {
     pub async fn merge_audio_video(&self, video_url: &str, audio_url: &str, offset: f64) -> Result<String> {
         let input = json!({ "video_url": video_url, "audio_url": audio_url, "start_offset": offset });
         let out = self.subscribe(MERGE_AUDIO_VIDEO_ENDPOINT, input).await?;
+        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
+    }
+
+    /// A video upscaled with ByteDance's upscaler; `settings` are its own
+    /// fields (target_resolution, enhancement_tier, enhancement_preset…).
+    pub async fn upscale_video(&self, video_url: &str, settings: Value) -> Result<String> {
+        let mut input = settings;
+        input["video_url"] = json!(video_url);
+        let out = self.subscribe(UPSCALE_VIDEO_ENDPOINT, input).await?;
         out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
     }
 

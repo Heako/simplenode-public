@@ -2,8 +2,12 @@ use serde::{Serialize, Serializer};
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {
-    #[error("Missing fal.ai key: add it in Settings → fal.ai API key")]
+    #[error("Missing fal.ai key: add it in Settings → fal.ai API key. Without fal, only the models WaveSpeed hosts can run")]
     MissingKey,
+    #[error("Add your WaveSpeed key in Settings → WaveSpeed")]
+    MissingWaveSpeedKey,
+    #[error("WaveSpeed: {0}")]
+    WaveSpeed(String),
     #[error("{0}")]
     Invalid(String),
     #[error("fal.ai: {0}")]
@@ -31,7 +35,7 @@ impl AppError {
     /// Failed before any provider started (and billed) a generation: a
     /// missing key, an invalid input, or a request the provider refused.
     pub fn unbilled(&self) -> bool {
-        matches!(self, AppError::MissingKey | AppError::MissingBytePlusKey | AppError::MissingBytePlusAkSk | AppError::Invalid(_) | AppError::Refused(_))
+        matches!(self, AppError::MissingKey | AppError::MissingWaveSpeedKey | AppError::MissingBytePlusKey | AppError::MissingBytePlusAkSk | AppError::Invalid(_) | AppError::Refused(_))
     }
 }
 

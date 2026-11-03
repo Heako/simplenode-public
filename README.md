@@ -1,6 +1,6 @@
 # SimpleNode
 
-A desktop app for building AI generation workflows as a node graph: connect prompts, images and videos to models (Nano Banana, Seedream, Kling, Veo, Seedance…), then run the graph. Every model runs through [fal.ai](https://fal.ai), and optionally BytePlus ModelArk.
+A desktop app for building AI generation workflows as a node graph: connect prompts, images and videos to models (Nano Banana, Seedream, Kling, Veo, Seedance…), then run the graph. Models run through [fal.ai](https://fal.ai) or, for those without a fal account, [WaveSpeed](https://wavespeed.ai); optionally BytePlus ModelArk.
 
 Built with **Tauri 2** (Rust backend) and **Next.js + React Flow** (interface).
 
@@ -24,7 +24,7 @@ xattr -dr com.apple.quarantine /Applications/SimpleNode.app
 
 **For the Compositor**, also install ffmpeg, once: install [Homebrew](https://brew.sh), then type `brew install ffmpeg` in the Terminal. The rest of the app works without it.
 
-**On first launch, SimpleNode guides you** through creating your [fal.ai](https://fal.ai) account, the service that generates the images and videos, adding some credit to it and pasting your key. fal.ai bills each generation per unit (from a few cents for an image to about a dollar for a video). Your key stays on your computer.
+**On first launch, SimpleNode guides you** through creating your [fal.ai](https://fal.ai) account, the service that generates the images and videos, adding some credit to it and pasting your key. You can pick [WaveSpeed](https://wavespeed.ai) instead: it runs most of the models (22 of them), but not Recast, the LLM tools nor a few models, which need a fal key. fal.ai bills each generation per unit (from a few cents for an image to about a dollar for a video). Your key stays on your computer.
 
 ## Features
 
@@ -40,7 +40,8 @@ xattr -dr com.apple.quarantine /Applications/SimpleNode.app
 - **BytePlus ModelArk (optional)**: Seedance 2.5 with an AI-created character whose face shows, which fal refuses. The character goes through an **AI Portrait** validated by BytePlus, or through a trusted **Seedream** image. AI Portrait, Seedance 2.5 and Seedream (BytePlus) nodes, with your own account and keys. Step-by-step setup: [docs/byteplus-guide.md](docs/byteplus-guide.md).
 - **Running**: "Run all" or run a single node, and a Stop button. A paid node that already has a result is never run again by "Run all", so you never pay twice; the estimated cost shows before launching.
 - **Projects**: home page with your files, thumbnails, trash, autosave.
-- **Settings**: fal.ai key, BytePlus keys (optional), price of each model, actual spending per model, local storage management.
+- **WaveSpeed (alternative to fal)**: with a WaveSpeed key, 22 of the models run on WaveSpeed: Nano Banana, Seedream, GPT Image 2, FLUX, Qwen Image 3, Recraft, Kling, MiniMax H3, Seedance, Veo 3.1, Hailuo, Wan, LTX, ElevenLabs. Recast also runs there with Wan 2.2 Animate Replace and Kling Motion Control, its segments cut and joined on your computer with ffmpeg. Settings come from WaveSpeed's own schema, and the cost shown is WaveSpeed's price. **Settings → Provider** picks who runs everything; with WaveSpeed, nothing goes to fal, and what only fal offers is marked "fal only".
+- **Settings**: fal.ai and WaveSpeed keys (WaveSpeed balance shown), BytePlus keys (optional), price of each model, actual spending per model, local storage management.
 
 ## Requirements
 
@@ -49,7 +50,7 @@ xattr -dr com.apple.quarantine /Applications/SimpleNode.app
 - **Rust**, recent stable toolchain (tested with 1.90): <https://rustup.rs>
 - **macOS**: Xcode or the Command Line Tools
 - **Windows / Linux**: the [Tauri system prerequisites](https://v2.tauri.app/start/prerequisites/)
-- A **fal.ai API key**: <https://fal.ai/dashboard/keys>
+- A **fal.ai API key**: <https://fal.ai/dashboard/keys>, or a **WaveSpeed** developer key: <https://wavespeed.ai/accesskey>
 
 ## Installation
 
@@ -180,6 +181,7 @@ src/                      Interface (Next.js static export)
     projects.ts           Reading / writing projects
     cost.ts               Per-second cost of video → video models
     byteplus.ts           BytePlus keys, options and cost estimates
+    provider.ts           Key status, and who runs models both fal and WaveSpeed host
 
 src-tauri/src/            Rust backend
   models.rs               fal model registry (source of truth)
@@ -188,6 +190,7 @@ src-tauri/src/            Rust backend
   compose.rs              Compositor: layer rendering with ffmpeg
   fal.rs                  fal client: queue, upload, drafts
   byteplus.rs             BytePlus client: Seedance, Seedream, portraits
+  wavespeed.rs            WaveSpeed client and the models it hosts
   account.rs              Keys (private file), prices, spending
   projects.rs             Project files
   storage.rs              Local media, crop, cleanup

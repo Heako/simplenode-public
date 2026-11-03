@@ -7,10 +7,12 @@ mod fal;
 mod graph;
 mod mcp;
 mod models;
+mod motion;
 mod projects;
 mod recast;
 mod schema;
 mod storage;
+mod wavespeed;
 
 use std::path::PathBuf;
 
@@ -69,8 +71,73 @@ fn reveal_media_folder(app: AppHandle) -> Result<()> {
 }
 
 #[tauri::command]
-fn list_models() -> Vec<&'static models::ModelDef> {
-    models::all().collect()
+fn list_models() -> Vec<serde_json::Value> {
+    // `wavespeed`: the model can also run on WaveSpeed.
+    models::all()
+        .map(|def| {
+            let mut value = serde_json::to_value(def).expect("model serializes");
+            value["wavespeed"] = serde_json::json!(wavespeed::mapping(def.id).is_some() || wavespeed::recast(def.id).is_some());
+            value
+        })
+        .collect()
+}
+
+/// Dollars left on the WaveSpeed account; also tests the key.
+#[tauri::command]
+async fn wavespeed_balance(state: State<'_, AppState>) -> Result<f64> {
+    wavespeed::WaveSpeed::from_account(&state.http)?.balance().await
+}
+
+/// "fal" or "wavespeed": who runs the models both providers host.
+#[tauri::command]
+fn set_provider(provider: String) -> Result<()> {
+    account::set_provider(&provider)
+}
+
+fn registry_model(model_id: &str) -> Result<&'static models::ModelDef> {
+    models::find(model_id).ok_or_else(|| error::AppError::Invalid(format!("Unknown model: {model_id}")))
+}
+
+/// Inspector settings of a model run on WaveSpeed, from WaveSpeed's schema.
+#[tauri::command]
+async fn wavespeed_settings(state: State<'_, AppState>, model_id: String, edit: bool) -> Result<Vec<schema::Setting>> {
+    let model = wavespeed::model_for(&model_id, registry_model(&model_id)?.label, edit)?;
+    wavespeed::WaveSpeed::from_account(&state.http)?.settings(model).await
+}
+
+/// Price of a node's next run on WaveSpeed: exact from WaveSpeed's price
+/// API; for Recast, its price per second times `seconds` of source video.
+#[tauri::command]
+async fn wavespeed_price(
+    state: State<'_, AppState>,
+    model_id: String,
+    edit: bool,
+    params: std::collections::HashMap<String, String>,
+    seconds: Option<f64>,
+) -> Result<wavespeed::Price> {
+    let def = registry_model(&model_id)?;
+    if let Some(recast) = wavespeed::recast(&model_id) {
+        let resolution = params.get("x:resolution").or(params.get("resolution")).map(String::as_str).unwrap_or_default();
+        let cost = (recast.per_second)(resolution) * seconds.unwrap_or(1.0);
+        return Ok(wavespeed::Price { cost, list: cost });
+    }
+    let map = wavespeed::mapping(&model_id).ok_or_else(|| error::AppError::Invalid(format!("{} isn't available on WaveSpeed", def.label)))?;
+    let model = map.endpoint(def.label, edit)?;
+    let ws = wavespeed::WaveSpeed::from_account(&state.http)?;
+    let schema = ws.schema(model).await?;
+    // References and prompts don't change the price.
+    let call = wavespeed::Call { prompt: "price", negative: "", refs: &[], end_frame: None, media: Vec::new() };
+    let inputs = wavespeed::build_input(&schema, map, def.label, &params, &call)?;
+    ws.price(model, &inputs).await
+}
+
+/// What an Upscale node costs for `seconds` of video, when it can be told:
+/// WaveSpeed's per-second rates; fal's price depends on the source, so none.
+#[tauri::command]
+fn upscale_cost(resolution: String, quality: String, seconds: f64) -> Result<Option<f64>> {
+    let on_wavespeed = account::provider()? == account::Provider::WaveSpeed;
+    let rate = wavespeed::upscale_per_second(graph::upscale_resolution(&resolution), quality == "pro");
+    Ok(on_wavespeed.then(|| rate * seconds.max(1.0).ceil()))
 }
 
 #[tauri::command]
@@ -143,6 +210,12 @@ async fn crop_image(app: AppHandle, value: String, params: std::collections::Has
     })
     .await
     .map_err(|e| error::AppError::Invalid(format!("Crop interrupted: {e}")))?
+}
+
+/// A frame of a video as an image, for the Extract frame node (local, free).
+#[tauri::command]
+async fn extract_frame(app: AppHandle, value: String, time: f64) -> Result<String> {
+    Ok(compose::frame(&app, &value, time).await?.to_string_lossy().into_owned())
 }
 
 #[tauri::command]
@@ -221,6 +294,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             key_status,
+            wavespeed_balance,
+            set_provider,
+            wavespeed_settings,
+            wavespeed_price,
             set_fal_key,
             test_fal_key,
             model_prices,
@@ -241,6 +318,8 @@ pub fn run() {
             run_graph,
             stop_nodes,
             crop_image,
+            extract_frame,
+            upscale_cost,
             mcp_status,
             mcp_configure,
             mcp_regenerate_token,

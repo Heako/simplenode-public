@@ -3,6 +3,7 @@
 //! at once; a node two of them need is executed once and shared.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -17,7 +18,7 @@ use crate::byteplus::{self, BytePlus};
 use crate::error::{AppError, Result};
 use crate::fal::{Fal, ModelCall};
 use crate::models::{self, Category, MediaKind};
-use crate::{compose, recast};
+use crate::{account, compose, motion, recast, wavespeed};
 use crate::storage::{self, CropSpec, View};
 
 pub type Ports = HashMap<String, String>;
@@ -97,7 +98,7 @@ struct NodeEvent<'a> {
 fn is_remote(kind: &str) -> bool {
     matches!(
         kind,
-        "model" | "enhancer" | "describer" | "videoDescriber" | "angles" | "recast" | "addAudio" | "bpPortrait" | "bpSeedance" | "bpSeedream"
+        "model" | "enhancer" | "describer" | "videoDescriber" | "motionPrompt" | "angles" | "recast" | "addAudio" | "upscale" | "bpPortrait" | "bpSeedance" | "bpSeedream"
     )
 }
 
@@ -228,6 +229,36 @@ fn llm_params(node: &GraphNode) -> Ports {
     Ports::from([("model".to_owned(), param(node, "model").to_owned())])
 }
 
+/// The Video → Prompt LLM call, on the user's provider.
+async fn describe_sheets(app: &AppHandle, http: &reqwest::Client, fal: &Fal, on_wavespeed: bool, sheets: &compose::Sheets, ask: &str) -> Result<String> {
+    if on_wavespeed {
+        let ws = wavespeed::WaveSpeed::from_account(http)?;
+        let images = try_join_all(sheets.paths.iter().map(|p| ws.upload(p))).await?;
+        let input = serde_json::json!({
+            "prompt": ask,
+            "system_prompt": motion::SYSTEM,
+            "images": images,
+            "model": motion::WAVESPEED_MODEL,
+            "max_tokens": 4000,
+        });
+        let serde_json::Value::Object(input) = input else { unreachable!() };
+        return ws.run(motion::WAVESPEED_ENDPOINT, input).await;
+    }
+    let refs = sheets.paths.iter().map(|p| storage::to_model_input(app, &p.to_string_lossy())).collect::<Result<Vec<_>>>()?;
+    let def = models::find("llm").expect("llm model is registered");
+    let params = Ports::from([("model".to_owned(), motion::FAL_MODEL.to_owned())]);
+    Ok(fal.run_model(def, &params, ModelCall { system: motion::SYSTEM, refs: &refs, ..ModelCall::new(ask) }).await?.value)
+}
+
+/// The Upscale node's resolution, as both providers spell it; 1080p by default.
+pub fn upscale_resolution(value: &str) -> &'static str {
+    match value {
+        "2k" => "2k",
+        "4k" => "4k",
+        _ => "1080p",
+    }
+}
+
 /// A Crop node's crop, from its params: also used live, outside a run.
 pub fn crop_spec(params: &Ports) -> Result<CropSpec> {
     let param = |k: &str| params.get(k).map(String::as_str).unwrap_or_default();
@@ -267,8 +298,218 @@ async fn render_piece(job: &recast::Job<'_>, index: usize, url: &str) -> (usize,
     (index, job.render(url).await)
 }
 
+/// A registry model run on WaveSpeed: same inputs as on fal, sent the way
+/// WaveSpeed's schema of the model expects them.
+async fn run_on_wavespeed(
+    app: &AppHandle,
+    http: &reqwest::Client,
+    node: &GraphNode,
+    inputs: &Inputs,
+    def: &models::ModelDef,
+    map: &wavespeed::Mapping,
+    prompt: &str,
+) -> Result<Ports> {
+    let wired_media = |key: &str| inputs.get(&format!("media:{key}")).filter(|v| !v.is_empty());
+    if def.media.iter().any(|m| wired_media(m.key).is_some() && !map.media.iter().any(|(k, _, _)| *k == m.key)) {
+        return Err(AppError::Invalid(format!("{} on WaveSpeed only takes images: unplug its video or audio inputs, or run it on fal", def.label)));
+    }
+    let ws = wavespeed::WaveSpeed::from_account(http)?;
+    // Local files go up to WaveSpeed's storage; URLs pass as they are.
+    let host = |value: &str| {
+        let value = value.to_owned();
+        let ws = &ws;
+        async move {
+            if value.starts_with("http") {
+                Ok(value)
+            } else {
+                ws.upload(&storage::owned_path(app, &value)?).await
+            }
+        }
+    };
+    let numbered = (1..=def.max_refs).filter_map(|i| first(inputs, &format!("ref{i}")));
+    let wired: Vec<&str> = inputs.get("refs").into_iter().flatten().map(String::as_str).chain(numbered).collect();
+    let mut refs = Vec::with_capacity(wired.len());
+    for value in wired {
+        refs.push(host(value).await?);
+    }
+    let end_frame = match first(inputs, "endFrame") {
+        Some(frame) => Some(host(frame).await?),
+        None => None,
+    };
+    let negative = match inputs.get("negative").filter(|v| !v.is_empty()) {
+        Some(texts) => texts.join(", "),
+        None => param(node, "negative").to_owned(),
+    };
+    let mut media = Vec::new();
+    for (key, field, many) in map.media {
+        let Some(values) = wired_media(key) else { continue };
+        let mut urls = Vec::with_capacity(values.len());
+        for value in values {
+            urls.push(host(value).await?);
+        }
+        media.push((*field, if *many { serde_json::json!(urls) } else { serde_json::json!(urls[0]) }));
+    }
+    let model = map.endpoint(def.label, !refs.is_empty())?;
+    let schema = ws.schema(model).await?;
+    let call = wavespeed::Call { prompt, negative: &negative, refs: &refs, end_frame, media };
+    let input = wavespeed::build_input(&schema, map, def.label, &node.params, &call)?;
+    let url = ws.run(model, input).await?;
+    let port = match def.category {
+        Category::Image => "image",
+        Category::Video => "video",
+        Category::Audio => "audio",
+        Category::Llm => return Err(AppError::Invalid("LLMs only run on fal".into())),
+    };
+    let path = storage::download(app, http, &url).await?;
+    Ok(Ports::from([(port.to_owned(), path.to_string_lossy().into_owned())]))
+}
+
+/// With WaveSpeed as the provider, nothing goes to fal: these nodes need it.
+const FAL_ONLY: &[(&str, &str)] =
+    &[("enhancer", "Prompt Enhancer"), ("describer", "Image Describer"), ("videoDescriber", "Video Describer"), ("angles", "Camera angles")];
+
+fn fal_only(what: &str) -> AppError {
+    AppError::Invalid(format!("{what} runs on fal.ai only: switch Provider to fal.ai in Settings to use it"))
+}
+
+/// One WaveSpeed Recast segment: uploaded, rendered, its result's URL.
+async fn render_ws_piece(ws: &wavespeed::WaveSpeed, render: &WsRecast<'_>, index: usize, source: PathBuf) -> (usize, Result<String>) {
+    let result = async {
+        let video = ws.upload(&source).await?;
+        ws.run(render.model.ws, wavespeed::recast_input(render.schema, render.model, render.params, render.prompt, render.image, &video)).await
+    };
+    (index, result.await)
+}
+
+/// What every segment of a WaveSpeed Recast shares.
+struct WsRecast<'a> {
+    model: &'static wavespeed::RecastModel,
+    schema: &'a serde_json::Value,
+    params: &'a HashMap<String, String>,
+    prompt: &'a str,
+    /// The character, hosted.
+    image: &'a str,
+}
+
+/// A local copy of a node value: its own path, or a download of its URL.
+async fn local_media(app: &AppHandle, http: &reqwest::Client, value: &str) -> Result<PathBuf> {
+    if value.starts_with("http") {
+        storage::download(app, http, value).await
+    } else {
+        storage::owned_path(app, value)
+    }
+}
+
+/// Recast with WaveSpeed as the provider. Segments are cut and joined here,
+/// with ffmpeg, instead of fal's tools: nothing goes to fal.
+async fn recast_on_wavespeed(app: &AppHandle, http: &reqwest::Client, node: &GraphNode, inputs: &Inputs, def: &models::ModelDef) -> Result<Ports> {
+    let model = wavespeed::recast(def.id).ok_or_else(|| fal_only(def.label))?;
+    let characters = inputs.get("characters").map(Vec::as_slice).unwrap_or_default();
+    match characters.len() {
+        0 => return Err(AppError::Invalid("Connect a character image".into())),
+        1 => {}
+        _ => return Err(AppError::Invalid(format!("{} takes a single character", def.label))),
+    }
+    let ws = wavespeed::WaveSpeed::from_account(http)?;
+    let image = if characters[0].starts_with("http") {
+        characters[0].clone()
+    } else {
+        ws.upload(&storage::owned_path(app, &characters[0])?).await?
+    };
+    let prompt = match inputs.get("prompt").filter(|v| !v.is_empty()) {
+        Some(texts) => texts.join("\n\n"),
+        None => param(node, "prompt").to_owned(),
+    };
+    let redo = param(node, "redo").parse::<usize>().ok();
+    let mut params = node.params.clone();
+    if redo.is_none() && param(node, "x:seed").trim().is_empty() {
+        let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.subsec_nanos());
+        params.insert("x:seed".into(), (nanos % 1_000_000).to_string());
+    }
+    let schema = ws.schema(model.ws).await?;
+    let job = WsRecast { model, schema: &schema, params: &params, prompt: &prompt, image: &image };
+    let mut out = Ports::new();
+    // Joined here once every segment is ready.
+    let join = |pieces: Vec<recast::Piece>| async move {
+        if pieces.iter().any(|p| p.video.is_empty()) {
+            return Ok::<_, AppError>((pieces, None));
+        }
+        let parts: Vec<PathBuf> = pieces.iter().map(|p| PathBuf::from(&p.video)).collect();
+        let video = compose::concat(app, &parts).await?;
+        Ok((pieces, Some(video.to_string_lossy().into_owned())))
+    };
+
+    if param(node, "redo") == "join" {
+        let pieces = recast::decode_pieces(node.outputs.get("pieces").map(String::as_str).unwrap_or_default())?;
+        let (pieces, video) = join(pieces).await?;
+        out.insert("pieces".into(), recast::encode_pieces(&pieces));
+        out.insert("video".into(), video.ok_or_else(|| AppError::Invalid("Redo the failed segments first".into()))?);
+        return Ok(out);
+    }
+    if let Some(index) = redo {
+        let mut pieces = recast::decode_pieces(node.outputs.get("pieces").map(String::as_str).unwrap_or_default())?;
+        let piece = pieces.get_mut(index).ok_or_else(|| AppError::Invalid(format!("Segment {} not found", index + 1)))?;
+        let (_, url) = render_ws_piece(&ws, &job, index, storage::owned_path(app, &piece.source)?).await;
+        piece.video = storage::download(app, http, &url?).await?.to_string_lossy().into_owned();
+        piece.error.clear();
+        let (pieces, video) = join(pieces).await?;
+        out.insert("pieces".into(), recast::encode_pieces(&pieces));
+        if let Some(video) = video {
+            out.insert("video".into(), video);
+        }
+        return Ok(out);
+    }
+
+    let source = local_media(app, http, require(inputs, "video", "a source video")?).await?;
+    let duration = compose::duration(&source).await?;
+    let cuts = recast::cuts(def, &params, duration);
+    if cuts.len() == 1 {
+        let (_, url) = render_ws_piece(&ws, &job, 0, source).await;
+        out.insert("video".into(), storage::download(app, http, &url?).await?.to_string_lossy().into_owned());
+        return Ok(out);
+    }
+    let mut pieces = Vec::with_capacity(cuts.len());
+    for &(start, len) in &cuts {
+        let part = compose::trim(app, &source, start, len).await?;
+        pieces.push(recast::Piece { source: part.to_string_lossy().into_owned(), ..Default::default() });
+    }
+    // Four at a time, as on fal; each segment shows up as it lands.
+    let sources: Vec<PathBuf> = pieces.iter().map(|p| PathBuf::from(&p.source)).collect();
+    let mut queue = sources.into_iter().enumerate();
+    let mut renders = FuturesUnordered::new();
+    for (i, path) in queue.by_ref().take(4) {
+        renders.push(render_ws_piece(&ws, &job, i, path));
+    }
+    while let Some((i, result)) = renders.next().await {
+        if let Some((next, path)) = queue.next() {
+            renders.push(render_ws_piece(&ws, &job, next, path));
+        }
+        match result {
+            Ok(url) => match storage::download(app, http, &url).await {
+                Ok(path) => pieces[i].video = path.to_string_lossy().into_owned(),
+                Err(err) => pieces[i].error = err.to_string(),
+            },
+            Err(err) => pieces[i].error = err.to_string(),
+        }
+        let partial = Ports::from([("pieces".to_owned(), recast::encode_pieces(&pieces))]);
+        app.emit("node-status", NodeEvent { id: &node.id, status: "running", outputs: Some(&partial), error: None, unbilled: false })?;
+    }
+    let (pieces, video) = join(pieces).await?;
+    out.insert("pieces".into(), recast::encode_pieces(&pieces));
+    if let Some(video) = video {
+        out.insert("video".into(), video);
+    }
+    Ok(out)
+}
+
 async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &GraphNode, inputs: &Inputs) -> Result<Ports> {
     let mut out = Ports::new();
+    let on_wavespeed = account::provider()? == account::Provider::WaveSpeed;
+    if on_wavespeed {
+        if let Some((_, what)) = FAL_ONLY.iter().find(|(kind, _)| *kind == node.kind) {
+            return Err(fal_only(what));
+        }
+    }
     match node.kind.as_str() {
         "prompt" => {
             out.insert("text".into(), fill_template(param(node, "text"), &declared_vars(node), inputs));
@@ -298,6 +539,12 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             let parts = inputs.get("texts").map(Vec::as_slice).unwrap_or_default();
             let text = parts.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect::<Vec<_>>().join(separator);
             out.insert("text".into(), text);
+        }
+        "frame" => {
+            let source = require(inputs, "video", "a video")?;
+            let at = param(node, "time").parse::<f64>().unwrap_or(0.0);
+            let path = compose::frame(app, source, at).await?;
+            out.insert("image".into(), path.to_string_lossy().into_owned());
         }
         "crop" => {
             let source = require(inputs, "image", "an image")?;
@@ -406,6 +653,20 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                 .value;
             out.insert("text".into(), text);
         }
+        "motionPrompt" => {
+            let sheets = compose::contact_sheets(app, require(inputs, "video", "a video")?).await?;
+            let notes = match inputs.get("notes").filter(|v| !v.is_empty()) {
+                Some(texts) => texts.join("\n"),
+                None => param(node, "notes").to_owned(),
+            };
+            let ask = motion::request(&sheets, &notes, param(node, "outfit") == "video");
+            let text = describe_sheets(app, http, fal, on_wavespeed, &sheets, &ask).await;
+            // The sheets were only for the LLM.
+            for p in &sheets.paths {
+                let _ = std::fs::remove_file(p);
+            }
+            out.insert("text".into(), text?.trim().to_owned());
+        }
         "videoDescriber" => {
             let video = storage::owned_path(app, require(inputs, "video", "a video")?)?;
             let url = fal.upload(&video).await?;
@@ -419,6 +680,9 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
         "recast" => {
             let def = recast::model(param(node, "mode"), param(node, "modelId"))
                 .ok_or_else(|| AppError::Invalid("Choose a model of this mode".into()))?;
+            if on_wavespeed {
+                return recast_on_wavespeed(app, http, node, inputs, def).await;
+            }
             let characters = inputs.get("characters").map(Vec::as_slice).unwrap_or_default();
             if characters.is_empty() {
                 return Err(AppError::Invalid("Connect at least one character image".into()));
@@ -529,6 +793,12 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             if prompt.trim().is_empty() {
                 return Err(AppError::Invalid("Missing prompt".into()));
             }
+            if on_wavespeed {
+                return match wavespeed::mapping(def.id) {
+                    Some(map) => run_on_wavespeed(app, http, node, inputs, def, map, &prompt).await,
+                    None => Err(fal_only(def.label)),
+                };
+            }
             // Numbered inputs (Image 1, Image 2…) in their order; `refs`
             // for single-reference models and projects saved before.
             let numbered = (1..=def.max_refs).filter_map(|i| first(inputs, &format!("ref{i}")));
@@ -590,15 +860,69 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                 }
             }
         }
+        "upscale" => {
+            let video = require(inputs, "video", "a video")?;
+            let resolution = upscale_resolution(param(node, "resolution"));
+            let pro = param(node, "quality") == "pro";
+            let fps = param(node, "fps").parse::<u32>().ok().filter(|f| (12..=120).contains(f));
+            let url = if on_wavespeed {
+                let ws = wavespeed::WaveSpeed::from_account(http)?;
+                let video = if video.starts_with("http") { video.to_owned() } else { ws.upload(&storage::owned_path(app, video)?).await? };
+                let input = serde_json::json!({ "video": video, "target_resolution": resolution });
+                let serde_json::Value::Object(input) = input else { unreachable!() };
+                ws.run(wavespeed::upscale_model(pro), input).await?
+            } else {
+                let video = if video.starts_with("http") { video.to_owned() } else { fal.upload(&storage::owned_path(app, video)?).await? };
+                let preset = match param(node, "look") {
+                    p @ ("general" | "ugc" | "short_series" | "old_film") => p,
+                    _ => "aigc",
+                };
+                let mut settings = serde_json::json!({
+                    "target_resolution": resolution,
+                    "enhancement_tier": if pro { "pro" } else { "standard" },
+                    "enhancement_preset": preset,
+                    "fidelity": if param(node, "fidelity") == "medium" { "medium" } else { "high" },
+                });
+                // fal interpolates the frame rate itself, better than ffmpeg.
+                if let Some(fps) = fps {
+                    settings["target_fps"] = serde_json::json!(fps);
+                }
+                fal.upscale_video(&video, settings).await?
+            };
+            let upscaled = storage::download(app, http, &url).await?;
+            let export = compose::Export {
+                format: match param(node, "format") {
+                    f @ ("h265" | "prores") => f,
+                    _ => "h264",
+                },
+                fps: if on_wavespeed { fps } else { None },
+                sound: param(node, "sound") != "off",
+            };
+            let path = if export.is_plain() {
+                upscaled
+            } else {
+                let path = compose::export(app, &upscaled, &export).await?;
+                let _ = std::fs::remove_file(&upscaled);
+                path
+            };
+            out.insert("video".into(), path.to_string_lossy().into_owned());
+        }
         "addAudio" => {
             let video = require(inputs, "video", "a video")?;
             let audio = require(inputs, "audio", "a sound")?;
+            let offset = param(node, "offset").parse::<f64>().unwrap_or(0.0).max(0.0);
+            // On WaveSpeed, done here with ffmpeg: fal isn't used.
+            if on_wavespeed {
+                let (video, audio) = futures::try_join!(local_media(app, http, video), local_media(app, http, audio))?;
+                let path = compose::replace_sound(app, &video, &audio, offset).await?;
+                out.insert("video".into(), path.to_string_lossy().into_owned());
+                return Ok(out);
+            }
             let host = |v: &str| {
                 let v = v.to_owned();
                 async move { if v.starts_with("http") { Ok(v) } else { fal.upload(&storage::owned_path(app, &v)?).await } }
             };
             let (video_url, audio_url) = futures::try_join!(host(video), host(audio))?;
-            let offset = param(node, "offset").parse::<f64>().unwrap_or(0.0).max(0.0);
             let url = fal.merge_audio_video(&video_url, &audio_url, offset).await?;
             out.insert("video".into(), storage::download(app, http, &url).await?.to_string_lossy().into_owned());
         }
@@ -623,12 +947,19 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
             out.insert("media".into(), path.to_string_lossy().into_owned());
         }
         "bpPortrait" => {
-            let source = require(inputs, "image", "an image of the character")?;
             let assets = byteplus::Assets::from_account(http)?;
             let previous = |k: &str| node.outputs.get(k).map(String::as_str).unwrap_or_default();
+            // A portrait added elsewhere (BytePlus console): nothing to upload, only its review to follow.
+            let existing = byteplus::existing_asset(param(node, "existing"))?;
+            let source = match existing {
+                Some(_) => "",
+                None => require(inputs, "image", "an image of the character, or paste an existing asset ID")?,
+            };
             // The same image was sent before: follow that portrait instead of
             // uploading it again (already validated, or review still going on).
-            let id = if previous("source") == source && !previous("assetId").is_empty() {
+            let id = if let Some(id) = existing {
+                id
+            } else if previous("source") == source && !previous("assetId").is_empty() {
                 previous("assetId").to_owned()
             } else {
                 // The library only takes a public URL: the image goes through fal storage.

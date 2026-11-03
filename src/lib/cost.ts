@@ -51,17 +51,30 @@ export const SEEDANCE_AUTO_SECONDS = 15;
 /** fal's price per 1000 tokens (November 2026), when the price list isn't loaded. */
 const SEEDANCE_PRICE_PER_1K = 0.0214;
 
+/** Seedance 2.5 with a reference video (motion transfer, swap): the input video is billed too. */
+const SEEDANCE_REFERENCE = new Set(["seedance-2.5-motion", "seedance-2.5-swap"]);
+/** Price factor when video inputs are provided (fal, November 2026). */
+const SEEDANCE_VIDEO_INPUT_FACTOR = 0.6;
+/** Used when a reference video's length isn't known yet: the longest it may be. */
+const SEEDANCE_MAX_INPUT_SECONDS = 30;
+
 export function isSeedance25(modelId: string | undefined) {
-  return modelId === "seedance-2.5" || modelId === "seedance-2.5-draft";
+  return modelId === "seedance-2.5" || modelId === "seedance-2.5-draft" || SEEDANCE_REFERENCE.has(modelId ?? "");
+}
+
+export function isSeedanceReference(modelId: string | undefined) {
+  return SEEDANCE_REFERENCE.has(modelId ?? "");
 }
 
 export interface SeedanceEstimate {
   cost: number;
   tokens: number;
   seconds: number;
-  /** The duration was "auto": estimated on SEEDANCE_AUTO_SECONDS. */
+  /** The duration was "auto" (or the input video's length unknown): an upper estimate. */
   auto: boolean;
   resolution: string;
+  /** Seconds of reference video billed with the output (motion transfer, swap). */
+  inputSeconds?: number;
 }
 
 /**
@@ -72,17 +85,24 @@ export interface SeedanceEstimate {
 export function seedanceEstimate(
   modelId: string | undefined,
   params: Record<string, string>,
-  { resolution, price }: { resolution?: string; price?: Price } = {},
+  { resolution, price, inputSeconds }: { resolution?: string; price?: Price; inputSeconds?: number | null } = {},
 ): SeedanceEstimate | null {
   if (!isSeedance25(modelId)) return null;
-  const res = resolution ?? (modelId === "seedance-2.5-draft" ? "480p" : params.resolution || "720p");
+  const reference = isSeedanceReference(modelId);
+  const draft = modelId === "seedance-2.5-draft" || (reference && params.draft !== "false");
+  const res = resolution ?? (draft ? "480p" : params.resolution || "720p");
   const surface = SEEDANCE_SURFACES[res];
-  const auto = !params.duration || params.duration === "auto";
-  const seconds = auto ? SEEDANCE_AUTO_SECONDS : Number(params.duration);
+  // fal bills a reference video's seconds too (input + output), at 0.6 × the token price.
+  const input = reference ? (inputSeconds && inputSeconds > 0 ? Math.min(inputSeconds, SEEDANCE_MAX_INPUT_SECONDS) : null) : 0;
+  const durationAuto = !params.duration || params.duration === "auto";
+  // "auto" on a reference video follows it (a swap keeps its length).
+  const seconds = !durationAuto ? Number(params.duration) : reference ? (input ?? SEEDANCE_MAX_INPUT_SECONDS) : SEEDANCE_AUTO_SECONDS;
+  const auto = (durationAuto && !(reference && input)) || (reference && input === null);
+  const billedInput = reference ? (input ?? SEEDANCE_MAX_INPUT_SECONDS) : 0;
   if (!surface || !(seconds > 0)) return null;
-  const tokens = (surface * 24 * seconds) / 1024;
-  const per1k = price?.unit === "1000 tokens" && price.unitPrice != null ? price.unitPrice : SEEDANCE_PRICE_PER_1K;
-  return { cost: (tokens / 1000) * per1k, tokens, seconds, auto, resolution: res };
+  const tokens = (surface * 24 * (seconds + billedInput)) / 1024;
+  const per1k = (price?.unit === "1000 tokens" && price.unitPrice != null ? price.unitPrice : SEEDANCE_PRICE_PER_1K) * (reference ? SEEDANCE_VIDEO_INPUT_FACTOR : 1);
+  return { cost: (tokens / 1000) * per1k, tokens, seconds, auto, resolution: res, ...(reference && { inputSeconds: billedInput }) };
 }
 
 /** "$16.50" */

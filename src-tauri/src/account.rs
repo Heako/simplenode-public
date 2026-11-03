@@ -48,6 +48,9 @@ pub enum KeyKind {
     BytePlusAk,
     #[serde(rename = "byteplusSk")]
     BytePlusSk,
+    /// WaveSpeedAI API key: an alternative to fal for the models it hosts.
+    #[serde(rename = "wavespeed")]
+    WaveSpeed,
 }
 
 impl KeyKind {
@@ -58,6 +61,7 @@ impl KeyKind {
             KeyKind::BytePlus => "byteplus",
             KeyKind::BytePlusAk => "byteplus-ak",
             KeyKind::BytePlusSk => "byteplus-sk",
+            KeyKind::WaveSpeed => "wavespeed",
         }
     }
 }
@@ -72,6 +76,9 @@ struct KeyFile {
     /// (and its password prompt) is never touched again.
     #[serde(default)]
     keychain_migrated: bool,
+    /// "fal" or "wavespeed": who runs the models both host, when both keys are saved.
+    #[serde(default)]
+    provider: Option<String>,
 }
 
 static KEY_FILE: OnceLock<PathBuf> = OnceLock::new();
@@ -157,6 +164,38 @@ pub fn byteplus_key() -> Result<String> {
     stored(KeyKind::BytePlus)?.ok_or(AppError::MissingBytePlusKey)
 }
 
+pub fn wavespeed_key() -> Result<String> {
+    stored(KeyKind::WaveSpeed)?.ok_or(AppError::MissingWaveSpeedKey)
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Provider {
+    Fal,
+    WaveSpeed,
+}
+
+/// Who runs the models both providers host: the only one with a key, else
+/// the user's choice (fal unless they picked WaveSpeed).
+pub fn provider() -> Result<Provider> {
+    let fal = main_key().is_ok();
+    let wavespeed = stored(KeyKind::WaveSpeed)?.is_some();
+    let picked = keys()?.lock().unwrap().provider.clone();
+    Ok(match (fal, wavespeed) {
+        (false, true) => Provider::WaveSpeed,
+        (true, true) if picked.as_deref() == Some("wavespeed") => Provider::WaveSpeed,
+        _ => Provider::Fal,
+    })
+}
+
+pub fn set_provider(provider: &str) -> Result<()> {
+    if !matches!(provider, "fal" | "wavespeed") {
+        return Err(AppError::Invalid(format!("unknown provider: {provider}")));
+    }
+    let mut file = keys()?.lock().unwrap();
+    file.provider = Some(provider.to_owned());
+    save(&file)
+}
+
 pub fn byteplus_aksk() -> Result<(String, String)> {
     match (stored(KeyKind::BytePlusAk)?, stored(KeyKind::BytePlusSk)?) {
         (Some(ak), Some(sk)) => Ok((ak, sk)),
@@ -193,6 +232,9 @@ pub struct KeyStatus {
     byteplus: bool,
     byteplus_ak: bool,
     byteplus_sk: bool,
+    wavespeed: bool,
+    /// Who runs the models both providers host: "fal" or "wavespeed".
+    provider: &'static str,
 }
 
 pub fn key_status() -> Result<KeyStatus> {
@@ -209,6 +251,11 @@ pub fn key_status() -> Result<KeyStatus> {
         byteplus: stored(KeyKind::BytePlus)?.is_some(),
         byteplus_ak: stored(KeyKind::BytePlusAk)?.is_some(),
         byteplus_sk: stored(KeyKind::BytePlusSk)?.is_some(),
+        wavespeed: stored(KeyKind::WaveSpeed)?.is_some(),
+        provider: match provider()? {
+            Provider::Fal => "fal",
+            Provider::WaveSpeed => "wavespeed",
+        },
     })
 }
 

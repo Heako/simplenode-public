@@ -24,13 +24,17 @@ import {
   WandSparkles,
   Wrench,
   ScanFace,
+  Frame,
+  ScrollText,
+  MonitorUp,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 import { useFlow } from "@/lib/store";
 import ProviderIcon from "./ProviderIcon";
-import { libraryItems, useModels, type LibraryItem } from "@/lib/spec";
+import { findModel, libraryItems, useModels, type LibraryItem } from "@/lib/spec";
+import { FAL_ONLY_KINDS, useKeys } from "@/lib/provider";
 
 type Section = "search" | "tools" | "image" | "video" | "audio" | "text";
 
@@ -70,9 +74,12 @@ const KIND_ICONS: Partial<Record<LibraryItem["kind"], LucideIcon>> = {
   angleExport: FolderDown,
   concat: Merge,
   crop: Crop,
+  frame: Frame,
   enhancer: WandSparkles,
   describer: FileText,
   videoDescriber: Film,
+  motionPrompt: ScrollText,
+  upscale: MonitorUp,
   addAudio: AudioLines,
   compositor: Layers,
   bpPortrait: ScanFace,
@@ -127,6 +134,11 @@ const DRAG_THRESHOLD = 4;
  */
 function Tile({ item }: { item: LibraryItem }) {
   const place = usePlaceItem();
+  // With WaveSpeed as the provider, flag what only runs on fal.
+  const needsFal = useKeys((s) => {
+    if (s.status?.provider !== "wavespeed") return false;
+    return item.kind === "model" ? !findModel(item.modelId)?.wavespeed : FAL_ONLY_KINDS.has(item.kind);
+  });
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
   const start = useRef<{ x: number; y: number } | null>(null);
   const Icon = itemIcon(item);
@@ -162,11 +174,12 @@ function Tile({ item }: { item: LibraryItem }) {
     <>
       <button
         onPointerDown={onPointerDown}
-        title={item.hint}
-        className="flex aspect-square cursor-grab flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-panel px-1 text-center hover:border-[#4a4a52] hover:bg-panel-2 active:cursor-grabbing"
+        title={needsFal ? `${item.hint} — runs on fal.ai only (Settings → Provider)` : item.hint}
+        className={`relative flex aspect-square cursor-grab flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-panel px-1 text-center hover:border-[#4a4a52] hover:bg-panel-2 active:cursor-grabbing ${needsFal ? "opacity-45" : ""}`}
       >
         <ProviderIcon modelId={item.modelId} size={17} fallback={Icon} className="text-fg" />
         <span className="line-clamp-2 text-[10px] leading-tight">{item.label}</span>
+        {needsFal && <span className="absolute top-1 right-1 rounded bg-panel-2 px-1 text-[8px] text-muted">fal only</span>}
       </button>
       {ghost &&
         createPortal(

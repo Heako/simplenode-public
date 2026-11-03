@@ -74,7 +74,7 @@ async function acknowledgeBytePlusBilling(nodes: FlowNode[], edges: Edge[], targ
 /** Nodes that generate media with a model and keep every result in `history`. */
 export function hasHistory(node: FlowNode) {
   const { kind } = node.data;
-  return kind === "model" || kind === "recast" || kind === "addAudio" || kind === "bpSeedance" || kind === "bpSeedream";
+  return kind === "model" || kind === "recast" || kind === "addAudio" || kind === "upscale" || kind === "bpSeedance" || kind === "bpSeedream";
 }
 
 /** A connection dragged from a port and dropped somewhere other than a port. */

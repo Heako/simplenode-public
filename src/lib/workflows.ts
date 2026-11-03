@@ -121,6 +121,88 @@ function swapGraph() {
   };
 }
 
+/**
+ * A source video and a character into Seedance 2.5 with a reference video,
+ * the way Higgsfield's Genjutsu works: `model` picks motion transfer or swap.
+ */
+function seedanceVideoGraph(model: string, text: string) {
+  const video = node("image", 0, 0, { title: "Source video", params: { path: "", media: "video" } });
+  const character = imageImport(0, 330, "Character");
+  const instructions = prompt(0, 660, text);
+  const seedance = imageModel(420, 200, 1, model);
+  const preview = node("preview", 860, 200);
+  return {
+    nodes: [video, character, instructions, seedance, preview],
+    edges: [
+      link(video, "video", seedance, "media:video_urls", "video"),
+      link(character, "image", seedance, "ref1", "image"),
+      link(instructions, "text", seedance, "prompt", "text"),
+      link(seedance, "video", preview, "value", "video"),
+    ],
+  };
+}
+
+const MOTION_PROMPT =
+  "@Image1 performs the exact movements, gestures, timing and camera moves of @Video1. " +
+  "Keep the face, hair, body and outfit of @Image1 in every frame. Keep the setting and the lighting of @Video1.";
+
+const SWAP_PROMPT =
+  "Replace the person in @Video1 with the person in @Image1: their face, hair, skin tone and body. " +
+  "Keep everything else from @Video1 exactly: the movements and timing, the camera, the outfit, the background and the lighting.";
+
+/**
+ * A video's action generated again with your character, without sending the
+ * video: a vision LLM writes it as a timed prompt (Video → Prompt), a frame of
+ * the video with your character put in it gives the setting and the start, and
+ * Seedance 2.5 renders it from that image and a close-up of the face. Real
+ * faces in a reference video make Seedance keep them; here it never sees one.
+ */
+function promptMotionGraph() {
+  const video = node("image", 0, 0, { title: "Source video", params: { path: "", media: "video" } });
+  const frame = node("frame", 400, 0);
+  const face = imageImport(0, 420, "Character · face (front)");
+  const profile = imageImport(0, 750, "Character · face (profile)");
+  const body = imageImport(0, 1080, "Character · full body, with the outfit");
+  const text = prompt(0, 1410, SCENE_PROMPT);
+  // Vertical like most source videos: "auto" can come back square. Change it for a landscape video.
+  const firstFrame = imageModel(800, 0, 4);
+  firstFrame.data.title = "First frame";
+  firstFrame.data.params = { ...firstFrame.data.params, aspect_ratio: "9:16", resolution: "2K" };
+  const describe = node("motionPrompt", 800, 520);
+  const seedance = imageModel(1240, 200, 4, "seedance-2.5-motion");
+  const preview = node("preview", 1680, 200);
+  const upscale = node("upscale", 1680, 640);
+  return {
+    nodes: [video, frame, face, profile, body, text, firstFrame, describe, seedance, preview, upscale],
+    edges: [
+      link(video, "video", frame, "video", "video"),
+      link(frame, "image", firstFrame, "ref1", "image"),
+      link(face, "image", firstFrame, "ref2", "image"),
+      link(profile, "image", firstFrame, "ref3", "image"),
+      link(body, "image", firstFrame, "ref4", "image"),
+      link(text, "text", firstFrame, "prompt", "text"),
+      link(video, "video", describe, "video", "video"),
+      link(describe, "text", seedance, "prompt", "text"),
+      link(firstFrame, "image", seedance, "ref1", "image"),
+      link(face, "image", seedance, "ref2", "image"),
+      link(profile, "image", seedance, "ref3", "image"),
+      link(body, "image", seedance, "ref4", "image"),
+      link(seedance, "video", preview, "value", "video"),
+      link(seedance, "video", upscale, "video", "video"),
+    ],
+  };
+}
+
+const SCENE_PROMPT =
+  "Edit Image 1. " +
+  "Replace the person in Image 1 with the person shown in Image 2, Image 3 and Image 4. " +
+  "Face, facial features, skin tone, hairstyle, hair length and hair color: from Image 2 (front) and Image 3 (profile). " +
+  "Body shape, clothes and shoes: from Image 4 (full body). " +
+  "Change the clothes completely: remove every garment, accessory and shoe worn in Image 1 and dress the person exactly as in Image 4 (same garments, colors and fabric; bare feet if Image 4 shows bare feet). " +
+  "Nothing of the original outfit may remain. " +
+  "Keep from Image 1 only the pose, the body position, the hands, the setting, the framing, the camera angle and the lighting. " +
+  "The result must look like the same photo as Image 1, with the person from Images 2 to 4 in it, wearing the outfit of Image 4.";
+
 function anglesGraph() {
   const source = imageImport(0, 0, "Reference image");
   const angles = node("angles", 400, 0);
@@ -172,6 +254,39 @@ export const WORKFLOWS: Workflow[] = [
     description: "Generates several shots of the same subject from one image (close-up, wide, low angle…), then lets you pick one.",
     steps: ["Import the reference image", "Choose the layout and shots on the Camera angles node", "Run it, then pick a shot in the Angle picker"],
     build: anglesGraph,
+  },
+  {
+    id: "seedance-swap",
+    category: "video",
+    title: "Swap a character (Seedance 2.5)",
+    description:
+      "Your character takes the place of the person in a 4–30 s video, in one take: same movements, camera, setting and light. Add more angles of your character (+ Image) for a closer likeness.",
+    steps: ["Import the source video (4–30 s)", "Import your character's image", "Run the model node: a 480p draft first, then finalize"],
+    build: () => seedanceVideoGraph("seedance-2.5-swap", SWAP_PROMPT),
+  },
+  {
+    id: "seedance-motion",
+    category: "video",
+    title: "Motion transfer (Seedance 2.5)",
+    description:
+      "Your character performs the movements of a 4–30 s video, in one take, with no cut into segments. Describe another setting in the prompt to change the scene.",
+    steps: ["Import the video with the motion (4–30 s)", "Import your character's image", "Run the model node: a 480p draft first, then finalize"],
+    build: () => seedanceVideoGraph("seedance-2.5-motion", MOTION_PROMPT),
+  },
+  {
+    id: "prompt-motion",
+    category: "video",
+    title: "Recreate a video with your character (Seedance 2.5)",
+    description:
+      "An LLM writes the video's action, camera and setting as a timed prompt; Seedance 2.5 generates it again with your character, in the video's setting. The video itself is never sent, so real faces in it don't block anything.",
+    steps: [
+      "Import the source video and three images of your character: face from the front, face in profile, full body with the outfit",
+      "On Extract frame, pick the first frame, then run First frame and check the likeness",
+      "Run Video → Prompt and read the prompt (add notes to change something)",
+      "Set the duration of the video on the Seedance node, then run it (480p is enough)",
+      "Once you like it, run Upscale / Export in 1080p, 2K or 4K and download it",
+    ],
+    build: promptMotionGraph,
   },
   {
     id: "recast-replace",

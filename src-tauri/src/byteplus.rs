@@ -64,6 +64,32 @@ const FACE_REFUSED: &str =
 // ---------------------------------------------------------------------------
 // Errors
 
+/// Shown when the account can't add portraits to its library: the usual
+/// cause is the free Basic tier, which allows no AI portraits at all.
+pub const PORTRAIT_RIGHTS: &str = "Uploading AI portraits needs Advanced Creation Rights on BytePlus. The free Entry tier is enough: \
+verify your company in the BytePlus console, then activate it. Or paste the ID of a portrait you already added in \"Existing asset ID\".";
+
+/// English message for an error of the asset library (portraits) API.
+fn explain_assets(status: StatusCode, code: &str, message: &str) -> String {
+    let lower = format!("{code} {message}").to_ascii_lowercase();
+    if status == StatusCode::UNAUTHORIZED || code.contains("Signature") || code.contains("AccessKey") {
+        "Access Key or Secret Key refused. Check them in Settings → BytePlus ModelArk".to_owned()
+    } else if lower.contains("not authorized to perform") {
+        format!("{message} — the IAM user of these keys lacks this permission. In the console: IAM → User → Authorize, attach a policy allowing ark:*Asset*, valid for the \"default\" project (or all projects).")
+    } else if lower.contains("letter") {
+        format!("{message} — on the first group creation, BytePlus asks you to sign the authorization letter in the console (Advanced Creation Rights).")
+    } else if ["creation right", "subscri", "advanced", "premium", "privilege", "not activated", "not enabled"].iter().any(|w| lower.contains(w))
+        || status == StatusCode::FORBIDDEN
+    {
+        // BytePlus's own words follow, should the cause be another one.
+        format!("{PORTRAIT_RIGHTS} (BytePlus: {message})")
+    } else if lower.contains("authoriz") {
+        format!("{message} — on the first group creation, BytePlus asks you to sign the authorization letter in the console (Advanced Creation Rights).")
+    } else {
+        explain(Some(status), code, message)
+    }
+}
+
 /// French message for a BytePlus error code and message.
 fn explain(status: Option<StatusCode>, code: &str, message: &str) -> String {
     let text = format!("{code} {message}").to_ascii_lowercase();
@@ -525,16 +551,7 @@ impl Assets {
         if !status.is_success() || error.is_object() {
             let code = error["Code"].as_str().unwrap_or_default();
             let message = error["Message"].as_str().map(str::to_owned).unwrap_or_else(|| status.to_string());
-            let text = if status == StatusCode::UNAUTHORIZED || code.contains("Signature") || code.contains("AccessKey") {
-                "Access Key or Secret Key refused. Check them in Settings → BytePlus ModelArk".to_owned()
-            } else if message.to_ascii_lowercase().contains("not authorized to perform") {
-                format!("{message} — the IAM user of these keys lacks this permission. In the console: IAM → User → Authorize, attach a policy allowing ark:*Asset*, valid for the \"default\" project (or all projects).")
-            } else if code.contains("Authoriz") || message.to_ascii_lowercase().contains("authoriz") {
-                format!("{message} — on the first group creation, BytePlus asks you to sign the authorization letter in the console (Advanced Creation Rights).")
-            } else {
-                explain(Some(status), code, &message)
-            };
-            return Err(AppError::BytePlus(text));
+            return Err(AppError::BytePlus(explain_assets(status, code, &message)));
         }
         Ok(out["Result"].clone())
     }
@@ -591,6 +608,20 @@ impl Assets {
 
 /// BytePlus documents no field giving why a portrait failed its review, so a
 /// refusal reminds the conditions instead.
+/// The id in a portrait pasted by hand (`asset://asset-…` or `asset-…`),
+/// e.g. one added in the BytePlus console; None when the field is empty.
+pub fn existing_asset(input: &str) -> Result<Option<String>> {
+    let id = input.trim().trim_start_matches("asset://");
+    if id.is_empty() {
+        return Ok(None);
+    }
+    let valid = id.starts_with("asset-") && id.len() > 6 && id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-');
+    if !valid {
+        return Err(AppError::Invalid(format!("Existing asset ID: expected asset://asset-… (as shown in the BytePlus console), not \"{}\"", input.trim())));
+    }
+    Ok(Some(id.to_owned()))
+}
+
 pub const PORTRAIT_REFUSED: &str = "Portrait refused by the BytePlus review (no reason is given). It must be an AI character that resembles no real person, with no logo or brand; jpeg, png or webp, sides of 300 to 6000 px, under 30 MB.";
 
 #[cfg(test)]
@@ -666,6 +697,31 @@ mod tests {
         for reused in ["duration", "ratio", "seed", "generate_audio", "draft"] {
             assert!(body.get(reused).is_none(), "{reused} must not be sent again");
         }
+    }
+
+    #[test]
+    fn existing_asset_ids_are_read_with_or_without_the_scheme() {
+        assert_eq!(existing_asset("").unwrap(), None);
+        assert_eq!(existing_asset("  ").unwrap(), None);
+        assert_eq!(existing_asset("asset://asset-20260222234430-mxpgh").unwrap().as_deref(), Some("asset-20260222234430-mxpgh"));
+        assert_eq!(existing_asset(" asset-20260222234430-mxpgh ").unwrap().as_deref(), Some("asset-20260222234430-mxpgh"));
+        assert!(existing_asset("https://example.com/nora.png").is_err());
+        assert!(existing_asset("asset://").unwrap().is_none());
+        assert!(existing_asset("asset-").is_err());
+    }
+
+    #[test]
+    fn portrait_rights_errors_point_to_the_entry_tier() {
+        let rights = explain_assets(StatusCode::FORBIDDEN, "AccessDenied", "This feature requires an Advanced or Premium subscription");
+        assert!(rights.starts_with(PORTRAIT_RIGHTS) && rights.contains("Premium subscription"), "{rights}");
+        assert!(!rights.contains("model not activated"), "{rights}");
+        // Same cause, other status or wording.
+        assert!(explain_assets(StatusCode::BAD_REQUEST, "", "Advanced Creation Rights not activated").starts_with(PORTRAIT_RIGHTS));
+        // Other causes keep their own advice.
+        assert!(explain_assets(StatusCode::FORBIDDEN, "", "User is not authorized to perform: ark:CreateAsset").contains("IAM"));
+        assert!(explain_assets(StatusCode::UNAUTHORIZED, "", "bad key").contains("Access Key"));
+        assert!(explain_assets(StatusCode::BAD_REQUEST, "", "Please sign the authorization letter").contains("authorization letter"));
+        assert!(explain_assets(StatusCode::FORBIDDEN, "", "Sign the authorization letter first").contains("first group creation"));
     }
 
     #[test]

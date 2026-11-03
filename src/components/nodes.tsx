@@ -2,7 +2,7 @@
 
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
-import { dollars } from "@/lib/cost";
+import { dollars, useVideoDuration } from "@/lib/cost";
 import { DRAFT_DAYS, dayMonth, draftExpired, draftExpiry, draftProvider, finalizeDraft, finalizeEstimate } from "@/lib/draft";
 import {
   SEEDANCE_DURATIONS,
@@ -57,6 +57,9 @@ import {
   ScanFace,
   TriangleAlert,
   KeyRound,
+  Frame,
+  ScrollText,
+  MonitorUp,
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -64,6 +67,7 @@ import { useFlow, useRunning, type FlowNode } from "@/lib/store";
 import ProviderIcon from "./ProviderIcon";
 import CompositorEditor, { type LayerInput } from "./CompositorEditor";
 import CropEditor from "./CropEditor";
+import { runnerLabel, useKeys } from "@/lib/provider";
 import TemplateEditor, { type TemplateEditorHandle, type VarDisplay } from "./TemplateEditor";
 import { ANGLE_LAYOUTS, MAX_GRID, MAX_LAYERS, compositorLayers, refNumbers, PORT_COLORS, varLabel, angleLayout, angleShots, findModel, gridSize, parseViews, listItems, llmOptions, portsFor, promptVars, recastParams, recastPrompt, useModels, type Port, type View } from "@/lib/spec";
 import { optionLabel } from "@/lib/settingLabels";
@@ -760,6 +764,8 @@ export function ImageNode(props: NodeProps<FlowNode>) {
 export function ModelNode(props: NodeProps<FlowNode>) {
   const { id, data } = props;
   const model = findModel(data.params.modelId);
+  // "WaveSpeed" or "fal only" when WaveSpeed is the provider.
+  const runner = useKeys((s) => runnerLabel(s.status, model?.id));
   const [prompt, setPrompt] = useParam(id, data, "prompt");
   const [system, setSystem] = useParam(id, data, "system");
   const promptWired = useConnected(id, "prompt");
@@ -775,7 +781,7 @@ export function ModelNode(props: NodeProps<FlowNode>) {
 
   return (
     <NodeShell {...props} icon={isLlm ? Sparkles : isVideo ? Clapperboard : isAudio ? AudioLines : ImageIcon} title={model?.label ?? data.params.modelId}
-      subtitle={model?.provider}
+      subtitle={[model?.provider, runner].filter(Boolean).join(" · ")}
       modelId={data.params.modelId}
       llmModel={data.params.model}>
       {!model && <div className="text-xs text-muted">Model not found in the registry.</div>}
@@ -1000,6 +1006,76 @@ export function CropNode(props: NodeProps<FlowNode>) {
   );
 }
 
+/**
+ * One frame of a video as an image (local ffmpeg, free). Live like Crop: the
+ * frame is made again whenever the video or the time changes.
+ */
+export function FrameNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const patchNode = useFlow((s) => s.patchNode);
+  const [time, setTime] = useParam(id, data, "time");
+  const input = useInputValue(id, "video");
+  const video = useRef<HTMLVideoElement>(null);
+  const result = data.outputs.image;
+  const key = JSON.stringify([input ?? "", time]);
+  useEffect(() => {
+    if (data.liveKey === key) return;
+    if (!input) {
+      if (result) patchNode(id, { outputs: {}, status: "idle", liveKey: key });
+      return;
+    }
+    const timer = setTimeout(() => {
+      patchNode(id, { status: "running" });
+      invoke<string>("extract_frame", { value: input, time: Number(time) || 0 })
+        .then((image) => patchNode(id, { outputs: { image }, status: "done", error: undefined, liveKey: key }))
+        .catch((err) => patchNode(id, { status: "error", error: String(err), liveKey: key }));
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  // The player follows the time typed in the field.
+  useEffect(() => {
+    const v = video.current;
+    const t = Number(time) || 0;
+    if (v && Math.abs(v.currentTime - t) > 0.05) v.currentTime = t;
+  }, [time, input]);
+
+  return (
+    <NodeShell {...props} icon={Frame} title="Extract frame" runnable={false}>
+      {input ? (
+        <video ref={video} src={mediaSrc(input)} className="nodrag w-full rounded-md bg-black" controls muted playsInline preload="metadata" />
+      ) : (
+        <div className="checker grid min-h-[120px] place-items-center rounded-xl border border-line text-[11px] text-muted">
+          Connect a video (already run)
+        </div>
+      )}
+      <div className="flex items-center gap-2">
+        <label className="nodrag flex items-center gap-2 text-[11px] text-muted">
+          Time (s)
+          <input
+            type="number"
+            min={0}
+            step={0.1}
+            className={`${field} w-20 text-right`}
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+          />
+        </label>
+        <button
+          className="nodrag ml-auto rounded-lg border border-line px-3 py-1.5 text-[12px] hover:border-accent disabled:opacity-30"
+          disabled={!input}
+          onClick={() => video.current && setTime(String(Math.round(video.current.currentTime * 100) / 100))}
+          title="Pause the video on the frame you want, then click"
+        >
+          Use this frame
+        </button>
+      </div>
+      <Media value={result} running={data.status === "running"} empty={<span>The frame shows here</span>} name="frame" />
+    </NodeShell>
+  );
+}
+
 function LlmSelect({ id, data }: { id: string; data: FlowNode["data"] }) {
   const [model, setModel] = useParam(id, data, "model");
   useModels((s) => s.models.length);
@@ -1063,6 +1139,36 @@ export function VideoDescriberNode(props: NodeProps<FlowNode>) {
   );
 }
 
+/**
+ * Describes a video's action, camera and setting as a timed prompt, so a
+ * video model can generate it again from reference images, without the video.
+ */
+export function MotionPromptNode(props: NodeProps<FlowNode>) {
+  const [notes, setNotes] = useParam(props.id, props.data, "notes");
+  const [outfit, setOutfit] = useParam(props.id, props.data, "outfit");
+  const notesWired = useConnected(props.id, "notes");
+  return (
+    <NodeShell {...props} icon={ScrollText} title="Video → Prompt" subtitle="frames read by a vision LLM">
+      {!notesWired && (
+        <textarea
+          className={`${GROW} ${field} nowheel h-14 resize-none`}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Notes (optional): what to change or stress, e.g. “she wears a red dress”"
+        />
+      )}
+      <label className="nodrag flex items-center gap-2 text-[11px] text-muted" title="Off: the prompt leaves the clothes to your reference images (add a full-body one)">
+        <input type="checkbox" className="accent-accent" checked={outfit === "video"} onChange={(e) => setOutfit(e.target.checked ? "video" : "character")} />
+        Keep the video&apos;s outfit
+      </label>
+      <TextOut value={props.data.outputs.text} />
+      <div className="text-[10px] leading-snug text-muted">
+        Refers to the performer as @Image1 and leaves out their looks: identity comes from your reference images.
+      </div>
+    </NodeShell>
+  );
+}
+
 /** Mirrors `recast::Piece` in Rust. */
 interface Piece {
   source: string;
@@ -1104,6 +1210,8 @@ const RECAST_SEGMENTS: [string, string][] = [
 
 export function RecastNode(props: NodeProps<FlowNode>) {
   const { id, data } = props;
+  const keys = useKeys((s) => s.status);
+  const runner = runnerLabel(keys, data.params.modelId);
   const patchNode = useFlow((s) => s.patchNode);
   const setParam = useFlow((s) => s.setParam);
   const pickHistory = useFlow((s) => s.pickHistory);
@@ -1198,7 +1306,7 @@ export function RecastNode(props: NodeProps<FlowNode>) {
   );
 
   return (
-    <NodeShell {...props} icon={Drama} title="Recast" subtitle={model?.label} modelId={data.params.modelId} cardWidth={340} fitHeight>
+    <NodeShell {...props} icon={Drama} title="Recast" subtitle={[model?.label, runner].filter(Boolean).join(" · ")} modelId={data.params.modelId} cardWidth={340} fitHeight>
       <div className="relative grid grid-cols-2 gap-1.5">
         <div className="checker grid aspect-[4/5] place-items-center overflow-hidden rounded-xl border border-line">
           {source ? (
@@ -1261,7 +1369,10 @@ export function RecastNode(props: NodeProps<FlowNode>) {
           <Select
             label="Model"
             value={data.params.modelId}
-            options={(mode?.models ?? []).map((c): [string, string] => [c.id, findModel(c.id)?.label ?? c.id])}
+            options={(mode?.models ?? []).map((c): [string, string] => [
+              c.id,
+              `${findModel(c.id)?.label ?? c.id}${keys?.provider === "wavespeed" && !findModel(c.id)?.wavespeed ? " (fal only)" : ""}`,
+            ])}
             onChange={(v) => choose(mode!.id, v)}
           />
         </div>
@@ -1718,6 +1829,115 @@ export function AddAudioNode(props: NodeProps<FlowNode>) {
   );
 }
 
+const UPSCALE_RESOLUTIONS: [string, string][] = [
+  ["1080p", "1080p (Full HD)"],
+  ["2k", "2K"],
+  ["4k", "4K"],
+];
+const UPSCALE_QUALITY: [string, string][] = [
+  ["standard", "Standard"],
+  ["pro", "Pro: finer detail, steadier frames (4–8× the price)"],
+];
+const UPSCALE_LOOKS: [string, string][] = [
+  ["aigc", "AI-generated video"],
+  ["general", "General"],
+  ["ugc", "Phone / social video"],
+  ["short_series", "Short drama"],
+  ["old_film", "Old film restoration"],
+];
+const UPSCALE_FIDELITY: [string, string][] = [
+  ["high", "Faithful: close to the source"],
+  ["medium", "Enhanced: sharper, more retouched"],
+];
+const UPSCALE_FPS: [string, string][] = [
+  ["", "Same as the source"],
+  ["24", "24 fps (cinema)"],
+  ["25", "25 fps"],
+  ["30", "30 fps"],
+  ["60", "60 fps (smooth, interpolated)"],
+];
+const UPSCALE_FORMATS: [string, string][] = [
+  ["h264", "MP4 · H.264 (plays everywhere)"],
+  ["h265", "MP4 · H.265 (half the size)"],
+  ["prores", "MOV · ProRes 422 HQ (for editing)"],
+];
+
+/**
+ * A finished video upscaled for export, then written locally in the chosen
+ * frame rate, format and sound; downloadable from the node.
+ */
+export function UpscaleNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const [resolution, setResolution] = useParam(id, data, "resolution");
+  const [quality, setQuality] = useParam(id, data, "quality");
+  const [look, setLook] = useParam(id, data, "look");
+  const [fidelity, setFidelity] = useParam(id, data, "fidelity");
+  const [fps, setFps] = useParam(id, data, "fps");
+  const [format, setFormat] = useParam(id, data, "format");
+  const [sound, setSound] = useParam(id, data, "sound");
+  const onFal = useKeys((s) => s.status?.provider !== "wavespeed");
+  const pickHistory = useFlow((s) => s.pickHistory);
+  const running = useRunning(id);
+  // WaveSpeed's per-second rate × the source's length; fal's can't be told before.
+  const seconds = useVideoDuration(useInputValue(id, "video"));
+  const [cost, setCost] = useState<number | null>(null);
+  useEffect(() => {
+    if (seconds == null) return setCost(null);
+    let live = true;
+    invoke<number | null>("upscale_cost", { resolution: resolution || "1080p", quality: quality || "standard", seconds })
+      .then((c) => live && setCost(c))
+      .catch(() => live && setCost(null));
+    return () => {
+      live = false;
+    };
+  }, [resolution, quality, seconds, onFal]);
+  return (
+    <NodeShell {...props} icon={MonitorUp} title="Upscale / Export">
+      <Media
+        value={data.outputs.video}
+        running={data.status === "running"}
+        empty={<span>Connect a finished video, then run</span>}
+        name={`video-${resolution || "1080p"}`}
+        history={data.history}
+        onPick={(i) => pickHistory(id, i)}
+      />
+      <div className="text-[10px] font-medium uppercase tracking-wide text-muted">Upscale (AI)</div>
+      <div className="grid grid-cols-2 gap-2">
+        <Select label="Resolution" value={resolution || "1080p"} options={UPSCALE_RESOLUTIONS} onChange={setResolution} />
+        <Select label="Quality" value={quality || "standard"} options={UPSCALE_QUALITY} onChange={setQuality} />
+      </div>
+      {onFal && (
+        <div className="grid grid-cols-2 gap-2">
+          <Select label="Footage" value={look || "aigc"} options={UPSCALE_LOOKS} onChange={setLook} />
+          <Select label="Enhancement" value={fidelity || "high"} options={UPSCALE_FIDELITY} onChange={setFidelity} />
+        </div>
+      )}
+      <div className="text-[10px] font-medium uppercase tracking-wide text-muted">Export (on this computer, free)</div>
+      <div className="grid grid-cols-2 gap-2">
+        <Select label="Frame rate" value={fps} options={UPSCALE_FPS} onChange={setFps} />
+        <Select label="Format" value={format || "h264"} options={UPSCALE_FORMATS} onChange={setFormat} />
+      </div>
+      <label className="nodrag flex items-center gap-2 text-[11px] text-muted">
+        <input type="checkbox" className="accent-accent" checked={sound !== "off"} onChange={(e) => setSound(e.target.checked ? "on" : "off")} />
+        Keep the sound
+      </label>
+      <div className="text-[10px] leading-snug text-muted">
+        Upscale a draft once you like it: a 480p render plus an upscale costs far less than rendering in 1080p.
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted">
+          {seconds == null
+            ? "Cost: connect a video"
+            : cost != null
+              ? `Cost ≈ ${dollars(cost)} (${Math.round(seconds)} s)`
+              : `fal bills by length (${Math.round(seconds)} s): see its pricing`}
+        </span>
+        <RunStop id={id} running={running} title="Upscales and exports the video" />
+      </div>
+    </NodeShell>
+  );
+}
+
 /** Images, videos and sounds as layers, placed in a full-screen editor and rendered with ffmpeg. */
 export function CompositorNode(props: NodeProps<FlowNode>) {
   const { id, data } = props;
@@ -1824,16 +2044,24 @@ export function BpPortraitNode(props: NodeProps<FlowNode>) {
   const { id, data } = props;
   const [name, setName] = useParam(id, data, "name");
   const [group, setGroup] = useParam(id, data, "group");
+  const [existing, setExisting] = useParam(id, data, "existing");
   const image = useInputValue(id, "image");
+  // A portrait added by hand (BytePlus console) replaces the upload.
+  const pasted = existing.trim() !== "";
   const running = useRunning(id);
   const gate = useBytePlusGate("bpPortrait");
   const [label, tone] = PORTRAIT_STATUS[data.outputs.assetStatus ?? ""] ?? ["Not sent yet", "bg-panel-2 text-muted"];
   // Another image wired since: running again sends it as a new portrait.
-  const changed = !!data.outputs.source && !!image && image !== data.outputs.source;
+  const changed = !pasted && !!data.outputs.source && !!image && image !== data.outputs.source;
 
   return (
     <NodeShell {...props} icon={ScanFace} title="AI Portrait" subtitle="BytePlus ModelArk" runnable={!gate}>
-      <Media value={image ?? data.outputs.source} running={data.status === "running"} empty={<span>Connect the character&apos;s image</span>} name={name || "portrait"} />
+      <Media
+        value={pasted ? undefined : (image ?? (data.outputs.source || undefined))}
+        running={data.status === "running"}
+        empty={<span>{pasted ? "Portrait from your BytePlus library" : "Connect the character's image, or paste an existing asset ID"}</span>}
+        name={name || "portrait"}
+      />
       <div className="flex items-center gap-2">
         <span className={`rounded px-1.5 py-0.5 text-[10px] ${tone}`}>{label}</span>
         {changed && <span className="text-[10px] text-muted">new image: run again to send it</span>}
@@ -1843,10 +2071,19 @@ export function BpPortraitNode(props: NodeProps<FlowNode>) {
           {data.outputs.portrait}
         </code>
       )}
-      <div className="grid grid-cols-2 gap-2">
-        <input className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Nora)" />
-        <input className={field} value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Group" title="BytePlus portrait group, created if missing" />
-      </div>
+      <input
+        className={`${field} font-mono`}
+        value={existing}
+        onChange={(e) => setExisting(e.target.value)}
+        placeholder="Existing asset ID (optional): asset://asset-…"
+        title="A portrait already in your BytePlus library, e.g. added in the console (Model Playground → My assets). It replaces the upload: no image needed."
+      />
+      {!pasted && (
+        <div className="grid grid-cols-2 gap-2">
+          <input className={field} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name (e.g. Nora)" />
+          <input className={field} value={group} onChange={(e) => setGroup(e.target.value)} placeholder="Group" title="BytePlus portrait group, created if missing" />
+        </div>
+      )}
       <div className="flex items-start gap-1.5 text-[10px] leading-snug text-muted">
         <TriangleAlert size={11} className="mt-px shrink-0 text-amber-300" />
         <span>AI character only — must not resemble any real person — no brand logo on the image.</span>
@@ -1855,7 +2092,9 @@ export function BpPortraitNode(props: NodeProps<FlowNode>) {
         <KeyNotice text={gate} />
       ) : (
         <div className="flex items-center gap-2">
-          <span className="text-[10px] leading-snug text-muted">The image goes through fal storage (fal key required).</span>
+          <span className="text-[10px] leading-snug text-muted">
+            {pasted ? "Checks the portrait's review status." : "The image goes through fal storage (fal key required)."}
+          </span>
           <div className="ml-auto">
             <RunStop id={id} running={running} title="Sends the portrait to BytePlus and follows its review (an image already validated is not sent again)" />
           </div>
@@ -2050,9 +2289,12 @@ export const nodeTypes = {
   router: RouterNode,
   concat: ConcatNode,
   crop: CropNode,
+  frame: FrameNode,
   enhancer: EnhancerNode,
   describer: DescriberNode,
   videoDescriber: VideoDescriberNode,
+  motionPrompt: MotionPromptNode,
+  upscale: UpscaleNode,
   recast: RecastNode,
   addAudio: AddAudioNode,
 };

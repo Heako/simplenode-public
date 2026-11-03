@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { useFlow } from "@/lib/store";
 import { useModels } from "@/lib/spec";
 import { listenToMcp } from "@/lib/mcp";
+import { useKeys } from "@/lib/provider";
 import Editor from "./Editor";
 import Home from "./Home";
 import Welcome from "./Welcome";
@@ -19,8 +20,10 @@ export default function App() {
   // Load the model registry once; new model nodes read their defaults from it.
   useEffect(() => {
     loadModels();
-    invoke<{ main: string | null }>("key_status")
-      .then((s) => setWelcome(!s.main))
+    useKeys.getState().refresh();
+    // Either provider's key is enough to start.
+    invoke<{ main: string | null; wavespeed: boolean }>("key_status")
+      .then((s) => setWelcome(!s.main && !s.wavespeed))
       .catch(() => setWelcome(false));
   }, [loadModels]);
 
@@ -31,6 +34,14 @@ export default function App() {
   }, []);
 
   if (welcome === null) return null;
-  if (welcome) return <Welcome onDone={() => setWelcome(false)} />;
+  if (welcome)
+    return (
+      <Welcome
+        onDone={() => {
+          useKeys.getState().refresh();
+          setWelcome(false);
+        }}
+      />
+    );
   return projectId ? <Editor key={projectId} /> : <Home />;
 }

@@ -7,8 +7,9 @@ import { useEffect, useState } from "react";
 import { create } from "zustand";
 import { hasHistory, useFlow, useRunning, type FlowNode } from "@/lib/store";
 import { findModel, isRefPort, useModels } from "@/lib/spec";
+import { runsOnWaveSpeed, useKeys } from "@/lib/provider";
 import { isAdvanced, optionLabel, settingLabel } from "@/lib/settingLabels";
-import { perSecond, seedanceEstimate, useVideoDuration } from "@/lib/cost";
+import { isSeedanceReference, perSecond, seedanceEstimate, useVideoDuration } from "@/lib/cost";
 import ProviderIcon from "./ProviderIcon";
 
 /** Mirrors `schema::Setting` in src-tauri. */
@@ -42,7 +43,13 @@ const useRemote = create<{
   prices: null,
   loadSettings: (endpoint) => {
     if (get().settings[endpoint]) return;
-    invoke<Setting[]>("model_settings", { endpoint })
+    // "ws:<modelId>:text|edit": a registry model run on WaveSpeed, with WaveSpeed's own schema.
+    const [scheme, modelId, mode] = endpoint.split(":");
+    const request =
+      scheme === "ws"
+        ? invoke<Setting[]>("wavespeed_settings", { modelId, edit: mode === "edit" })
+        : invoke<Setting[]>("model_settings", { endpoint });
+    request
       .then((s) => set({ settings: { ...get().settings, [endpoint]: s } }))
       .catch(() => set({ settings: { ...get().settings, [endpoint]: "error" } }));
   },
@@ -54,6 +61,23 @@ const useRemote = create<{
       .catch(() => {});
   },
 }));
+
+/** WaveSpeed's exact price for the node's settings, asked again when they change. */
+function useWaveSpeedPrice(modelId: string | undefined, edit: boolean, params: Record<string, string>, seconds?: number) {
+  const [state, setState] = useState<{ key: string; cost?: number; error?: string }>({ key: "" });
+  const key = modelId ? JSON.stringify([modelId, edit, params, seconds]) : "";
+  useEffect(() => {
+    if (!modelId) return;
+    const timer = setTimeout(() => {
+      invoke<{ cost: number }>("wavespeed_price", { modelId, edit, params, seconds: seconds ?? null })
+        .then((p) => setState({ key, cost: p.cost }))
+        .catch((e) => setState({ key, error: String(e) }));
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return state.key === key ? state : { key };
+}
 
 const box = "nodrag rounded-md border border-line bg-panel-2 px-2 py-1.5 text-xs text-fg outline-none focus:border-accent";
 const field = `${box} w-full`;
@@ -212,21 +236,39 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const stop = useFlow((s) => s.stop);
   const running = useRunning(id);
   const refsWired = useFlowStore((s) => s.edges.some((e) => e.target === id && isRefPort(e.targetHandle)));
-  const endpoint = (refsWired ? model?.editEndpoint : model?.textEndpoint) ?? model?.textEndpoint ?? model?.editEndpoint ?? null;
+  const keys = useKeys((s) => s.status);
+  const refreshKeys = useKeys((s) => s.refresh);
+  // On WaveSpeed, settings and prices come from WaveSpeed's own schema of the model.
+  const onWs = runsOnWaveSpeed(keys, model?.id);
+  const falEndpoint = (refsWired ? model?.editEndpoint : model?.textEndpoint) ?? model?.textEndpoint ?? model?.editEndpoint ?? null;
+  const endpoint = onWs ? `ws:${model!.id}:${refsWired ? "edit" : "text"}` : falEndpoint;
   // The endpoint of the other mode, whose settings are listed too.
-  const other = [model?.textEndpoint, model?.editEndpoint].find((e) => e && e !== endpoint) ?? null;
+  const other = onWs
+    ? model?.textEndpoint && model?.editEndpoint
+      ? `ws:${model.id}:${refsWired ? "text" : "edit"}`
+      : null
+    : ([model?.textEndpoint, model?.editEndpoint].find((e) => e && e !== endpoint) ?? null);
   const { settings, prices, loadSettings, loadPrices } = useRemote();
   const [runs, setRuns] = useState(1);
   const [progress, setProgress] = useState<number | null>(null);
   // Recast is billed per second of video: the estimate needs the source's length.
+  // Recast and Seedance 2.5 with a reference video bill the source's seconds.
+  const sourceHandle = data.kind === "recast" ? "video" : isSeedanceReference(model?.id) ? "media:video_urls" : null;
   const source = useFlowStore((s) => {
-    if (data.kind !== "recast") return undefined;
-    const edge = s.edges.find((e) => e.target === id && e.targetHandle === "video");
+    if (!sourceHandle) return undefined;
+    const edge = s.edges.find((e) => e.target === id && e.targetHandle === sourceHandle);
     const from = edge && (s.nodeLookup.get(edge.source)?.data as FlowNode["data"] | undefined);
     return from ? from.outputs[edge.sourceHandle ?? ""] : undefined;
   });
   const duration = useVideoDuration(source);
+  // Recast on WaveSpeed is priced per second of source video.
+  const wsPrice = useWaveSpeedPrice(onWs ? model?.id : undefined, refsWired, data.params, data.kind === "recast" ? (duration ?? undefined) : undefined);
+  // WaveSpeed is the provider but doesn't host this model: it won't run.
+  const falOnlyHere = keys?.provider === "wavespeed" && !onWs;
 
+  useEffect(() => {
+    refreshKeys();
+  }, [refreshKeys]);
   useEffect(() => {
     if (endpoint) loadSettings(endpoint);
     if (other) loadSettings(other);
@@ -237,7 +279,8 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const list = settings[endpoint];
   // The registry's settings come first; fal's schema adds the rest.
   // Single-option ones are fixed values, nothing to choose.
-  const main: Setting[] = model.params
+  // On WaveSpeed, every setting comes from its schema (the registry's are fal's).
+  const main: Setting[] = (onWs ? [] : model.params)
     .filter((p) => p.options.length > 1 && !(p.textOnly && refsWired))
     .map((p) => ({
       key: p.key,
@@ -251,7 +294,7 @@ function ModelInspector({ node }: { node: FlowNode }) {
       description: null,
     }));
   // ElevenLabs sound effects name their prompt `text`: it comes from the node, not here.
-  const own = new Set([...model.params.map((p) => p.key), "prompt", "negative_prompt", ...(model.category === "audio" ? ["text"] : [])]);
+  const own = new Set([...(onWs ? [] : model.params.map((p) => p.key)), "prompt", "negative_prompt", ...(model.category === "audio" ? ["text"] : [])]);
   const otherList = other ? settings[other] : undefined;
   const otherOnly: Shown[] = Array.isArray(otherList) && Array.isArray(list)
     ? otherList
@@ -264,11 +307,11 @@ function ModelInspector({ node }: { node: FlowNode }) {
   const common = extra.filter((s) => !isAdvanced(s.key));
   const advanced = extra.filter((s) => isAdvanced(s.key));
   const touched = Object.keys(data.params).some((k) => k.startsWith("x:") && data.params[k] !== "");
-  const price = prices?.find((p) => p.endpoint === endpoint);
+  const price = onWs ? undefined : prices?.find((p) => p.endpoint === endpoint);
   const perRun = price?.unitPrice != null && price.unit && PER_RUN_UNITS.has(price.unit);
   const rate = data.kind === "recast" ? perSecond(price, data.params.resolution) : null;
   // Seedance 2.5 is billed in video tokens, from its resolution and duration.
-  const tokens = seedanceEstimate(model.id, data.params, { price });
+  const tokens = seedanceEstimate(model.id, data.params, { price, inputSeconds: duration });
   const currency = price?.currency ?? "USD";
   const control = (s: Shown, key: string) => (
     <div key={s.key} className={s.onlyIn ? "opacity-60" : undefined} title={s.onlyIn ? "Only applied in this mode" : undefined}>
@@ -297,12 +340,20 @@ function ModelInspector({ node }: { node: FlowNode }) {
         <ProviderIcon modelId={model.id} llmModel={data.params.model} size={18} fallback={SlidersHorizontal} className="text-muted" />
         <div className="min-w-0 flex-1">
           <div className="truncate text-[13px] font-medium">{data.title || model.label}</div>
-          <div className="truncate text-[10px] text-muted">
+          <div className="flex min-w-0 items-center gap-1.5 truncate text-[10px] text-muted">
+            {/* The service that runs it comes first, before the model's maker. */}
+            {onWs && (
+              <span className="shrink-0 rounded bg-sky-500/15 px-1 py-px text-[10px] text-sky-300" title="This model runs on WaveSpeed (Settings → WaveSpeed)">
+                WaveSpeed
+              </span>
+            )}
+            <span className="truncate">
             {model.provider} ·{" "}
             {data.kind === "recast" ? "video → video" : refsWired ? (model.category === "video" ? "image → video" : "edit") : "text →"}
+            </span>
           </div>
         </div>
-        {rate != null ? (
+        {onWs ? null : rate != null ? (
           <span
             className="shrink-0 rounded-md bg-panel-2 px-1.5 py-0.5 text-[11px] text-muted tabular-nums"
             title={`fal price: ${money(rate, currency)} per second of video, at this resolution`}
@@ -321,6 +372,12 @@ function ModelInspector({ node }: { node: FlowNode }) {
       </header>
 
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4">
+        {falOnlyHere && (
+          <p className="rounded-md bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-200">
+            WaveSpeed is your provider and doesn&apos;t host {model.label}: it won&apos;t run. Pick another model, or switch Provider to fal.ai in
+            Settings.
+          </p>
+        )}
         <div className="flex items-center justify-between">
           <h3 className="text-[11px] font-medium tracking-wide text-muted uppercase">Settings</h3>
           {touched && (
@@ -343,7 +400,7 @@ function ModelInspector({ node }: { node: FlowNode }) {
           </details>
         )}
         <p className="pt-1 text-[10px] leading-snug text-muted">
-          Settings read from the schema fal publishes for this endpoint{refsWired ? " (reference image mode)" : ""}.
+          Settings read from the schema {onWs ? "WaveSpeed" : "fal"} publishes for this model{refsWired ? " (reference image mode)" : ""}.
         </p>
       </div>
 
@@ -365,14 +422,28 @@ function ModelInspector({ node }: { node: FlowNode }) {
           <span
             className="tabular-nums"
             title={
-              rate != null
+              onWs
+                ? wsPrice.error
+                  ? `WaveSpeed couldn't price this request: ${wsPrice.error}`
+                  : "Exact price given by WaveSpeed for these settings, your account's discount included."
+                : rate != null
                 ? "Price per second × length of the source video. Redoing a segment costs its length."
                 : tokens
-                  ? `${Math.round(tokens.tokens).toLocaleString("en-US")} tokens at ${tokens.resolution} (width × height × 24 × duration / 1024). Sound doesn't change the price.`
+                  ? tokens.inputSeconds != null
+                    ? `${Math.round(tokens.tokens).toLocaleString("en-US")} tokens at ${tokens.resolution}: width × height × 24 × (${tokens.inputSeconds} s of reference video + ${tokens.seconds} s generated) / 1024, at 0.6 × the token price. Sound doesn't change the price.`
+                    : `${Math.round(tokens.tokens).toLocaleString("en-US")} tokens at ${tokens.resolution} (width × height × 24 × duration / 1024). Sound doesn't change the price.`
                   : undefined
             }
           >
-            {tokens
+            {onWs
+              ? wsPrice.cost != null
+                ? data.kind === "recast" && duration == null
+                  ? `${money(wsPrice.cost, "USD")} / s of video`
+                  : `${money(wsPrice.cost * runs, "USD")}${data.kind === "recast" && duration != null ? ` (${Math.round(duration)} s)` : ""}`
+                : wsPrice.error
+                  ? "—"
+                  : "…"
+              : tokens
               ? `${money(tokens.cost * runs, currency)}${tokens.auto ? ` (auto duration: ${tokens.seconds} s)` : ""}`
               : rate != null
               ? duration != null

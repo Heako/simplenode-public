@@ -363,6 +363,8 @@ const SECONDS_3_15: &[&str] = &["3", "4", "5", "6", "7", "8", "9", "10", "11", "
 
 const SECONDS_SEEDANCE_25: &[&str] = &["auto", "4", "5", "6", "8", "10", "12", "15", "20", "25", "30"];
 const ASPECT_SEEDANCE_25: &[&str] = &["auto", "16:9", "9:16", "1:1", "4:3", "3:4", "21:9"];
+/// Reference videos and images, for motion transfer and editing.
+const SEEDANCE_25_REFERENCE: &str = "bytedance/seedance-2.5/reference-to-video";
 
 pub static VIDEO_MODELS: &[ModelDef] = &[
     ModelDef {
@@ -446,6 +448,58 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
             select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE_25, "auto").text_only(),
             select("resolution", "Resolution", &["480p", "720p", "1080p"], "720p"),
             toggle("generate_audio", "Audio", "true"),
+        ],
+    },
+    // Seedance 2.5 with a reference video, the way Higgsfield's Genjutsu
+    // works: one fal endpoint, its `task` picks motion transfer or editing.
+    // Fixed (single-option) params are sent but not shown.
+    ModelDef {
+        id: "seedance-2.5-motion",
+        label: "Seedance 2.5 Motion transfer",
+        provider: "ByteDance",
+        category: Category::Video,
+        text_endpoint: Some(SEEDANCE_25_REFERENCE),
+        edit_endpoint: Some(SEEDANCE_25_REFERENCE),
+        ref_field: RefField::Urls,
+        max_refs: 30,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[media("video_urls", "Motion video", MediaKind::Video, true, Mode::Both)],
+        params: &[
+            select("task", "Task", &["reference"], "reference"),
+            toggle("draft", "480p draft", "true"),
+            select("duration", "Duration (s)", SECONDS_SEEDANCE_25, "auto"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE_25, "auto"),
+            select("resolution", "Resolution", &["480p", "720p", "1080p"], "720p"),
+            toggle("generate_audio", "Audio", "true"),
+            select("bitrate_mode", "Bitrate", &["high", "standard"], "high"),
+        ],
+    },
+    ModelDef {
+        id: "seedance-2.5-swap",
+        label: "Seedance 2.5 Character swap",
+        provider: "ByteDance",
+        category: Category::Video,
+        text_endpoint: Some(SEEDANCE_25_REFERENCE),
+        edit_endpoint: Some(SEEDANCE_25_REFERENCE),
+        ref_field: RefField::Urls,
+        max_refs: 30,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[media("video_urls", "Video to edit", MediaKind::Video, true, Mode::Both)],
+        // Editing keeps the source's length and aspect ratio.
+        params: &[
+            select("task", "Task", &["editing"], "editing"),
+            toggle("draft", "480p draft", "true"),
+            select("duration", "Duration (s)", &["auto"], "auto"),
+            select("aspect_ratio", "Aspect ratio", &["auto"], "auto"),
+            select("resolution", "Resolution", &["480p", "720p", "1080p"], "720p"),
+            toggle("generate_audio", "Audio", "true"),
+            select("bitrate_mode", "Bitrate", &["high", "standard"], "high"),
         ],
     },
     ModelDef {

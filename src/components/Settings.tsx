@@ -3,23 +3,16 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Bot, Check, Clapperboard, Coffee, Copy, Eye, EyeOff, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
+import { Bot, Check, Waves, Clapperboard, Coffee, Copy, Eye, EyeOff, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import ProviderIcon from "./ProviderIcon";
 import { useModels } from "@/lib/spec";
 import { perSecondRows } from "@/lib/cost";
 import { useMcpSpend, type McpStatus } from "@/lib/mcp";
 import { BYTEPLUS_LINKS, useBytePlusKeys } from "@/lib/byteplus";
+import { WAVESPEED_LINKS, useKeys, type KeyStatus } from "@/lib/provider";
 
-type KeyKind = "main" | "billing" | "byteplus" | "byteplusAk" | "byteplusSk";
-
-interface KeyStatus {
-  main: "saved" | "env" | null;
-  billing: boolean;
-  byteplus: boolean;
-  byteplusAk: boolean;
-  byteplusSk: boolean;
-}
+type KeyKind = "main" | "billing" | "byteplus" | "byteplusAk" | "byteplusSk" | "wavespeed";
 
 interface PriceRow {
   label: string;
@@ -182,8 +175,9 @@ function KeyField({
 }
 
 function KeysSection() {
-  const [status, setStatus] = useState<KeyStatus | null>(null);
-  const refresh = useCallback(() => invoke<KeyStatus>("key_status").then(setStatus), []);
+  // Shared: the Provider section follows a fal key saved or deleted here.
+  const status = useKeys((s) => s.status);
+  const refresh = useKeys((s) => s.refresh);
   useEffect(() => {
     refresh();
   }, [refresh]);
@@ -214,6 +208,174 @@ function KeysSection() {
           hint="To show your spending. fal requires a key created with the BILLING or FULL preset; otherwise the generation key is used."
         />
       </div>
+    </Section>
+  );
+}
+
+/** Who runs the models: fal.ai or WaveSpeed, at a glance and switched in one click. */
+function ProviderSection() {
+  const status = useKeys((s) => s.status);
+  const refresh = useKeys((s) => s.refresh);
+  const models = useModels((s) => s.models);
+  const [error, setError] = useState<string | null>(null);
+  const [switched, setSwitched] = useState<string | null>(null);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  const hosted = models.filter((m) => m.wavespeed).length;
+  const cards = [
+    { id: "fal", name: "fal.ai", models: `All ${models.length} models, Recast and the LLM tools`, key: !!status?.main, section: "#keys" },
+    {
+      id: "wavespeed",
+      name: "WaveSpeed",
+      models: `${hosted} models, Recast with Wan 2.2 and Kling; the others need fal`,
+      key: !!status?.wavespeed,
+      section: "#wavespeed",
+    },
+  ] as const;
+
+  function choose(id: "fal" | "wavespeed") {
+    if (status?.provider === id) return;
+    setError(null);
+    invoke("set_provider", { provider: id })
+      .then(refresh)
+      .then(() => setSwitched(id === "fal" ? "fal.ai" : "WaveSpeed"))
+      .catch((e) => setError(String(e)));
+  }
+
+  return (
+    <Section id="provider" icon={Waves} title="Provider" description="Who runs the image, video and sound models. Each one bills its own account.">
+      <div className="grid grid-cols-2 gap-3">
+        {cards.map((c) => {
+          const active = status?.provider === c.id && c.key;
+          return (
+            <div
+              key={c.id}
+              role="button"
+              tabIndex={c.key ? 0 : -1}
+              onClick={() => c.key && choose(c.id)}
+              onKeyDown={(e) => e.key === "Enter" && c.key && choose(c.id)}
+              className={`rounded-lg border p-3 text-[12px] ${
+                active ? "border-accent bg-accent/10" : c.key ? "cursor-pointer border-line hover:border-[#4a4a52]" : "border-line opacity-70"
+              }`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`grid h-3.5 w-3.5 place-items-center rounded-full border ${active ? "border-accent" : "border-muted"}`}>
+                  {active && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
+                </span>
+                <span className="text-[13px] font-medium">{c.name}</span>
+                <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] ${c.key ? "bg-emerald-500/15 text-emerald-300" : "bg-panel-2 text-muted"}`}>
+                  {c.key ? "Key set" : "No key"}
+                </span>
+              </div>
+              <p className="mt-1.5 text-muted">{c.models}</p>
+              {!c.key && (
+                <a href={c.section} className="mt-1.5 inline-block text-accent hover:underline" onClick={(e) => e.stopPropagation()}>
+                  Add key
+                </a>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-3 text-[11px] leading-relaxed text-muted">
+        {!status?.main && !status?.wavespeed
+          ? "Add a fal.ai or a WaveSpeed key to run models."
+          : status?.provider === "wavespeed"
+            ? status.main
+              ? "Everything runs on WaveSpeed, nothing on fal: models and tools it doesn't host are marked “fal only” and won't run. Recast segments are cut and joined on this computer (ffmpeg)."
+              : "Everything runs on WaveSpeed. Models and tools marked “fal only” in the library need fal. Recast segments are cut and joined on this computer (ffmpeg)."
+            : "Every model runs on fal.ai."}{" "}
+        The inspector shows a “WaveSpeed” badge on models that run there.
+      </p>
+      {switched && (
+        <p className="mt-2 rounded-md bg-sky-500/10 px-2.5 py-2 text-[11px] leading-snug text-sky-200">
+          Switched to {switched}. Nodes use it from their next run; results and messages already on the canvas stay as they were until you
+          run those nodes again.
+        </p>
+      )}
+      {error && <p className="mt-2 text-[12px] text-red-300">{error}</p>}
+    </Section>
+  );
+}
+
+/** WaveSpeedAI: an alternative to fal for the models it hosts. */
+function WaveSpeedSection() {
+  const status = useKeys((s) => s.status);
+  const refresh = useKeys((s) => s.refresh);
+  const models = useModels((s) => s.models);
+  const [balance, setBalance] = useState<{ busy?: boolean; value?: number; error?: string }>({});
+  const loadBalance = useCallback(() => {
+    setBalance({ busy: true });
+    invoke<number>("wavespeed_balance")
+      .then((value) => setBalance({ value }))
+      .catch((e) => setBalance({ error: String(e) }));
+  }, []);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
+  useEffect(() => {
+    if (status?.wavespeed) loadBalance();
+  }, [status?.wavespeed, loadBalance]);
+
+  const hosted = models.filter((m) => m.wavespeed);
+  const both = !!status?.main && !!status?.wavespeed;
+
+  return (
+    <Section
+      id="wavespeed"
+      icon={Waves}
+      title="WaveSpeed API key"
+      description={`An alternative to fal, for those without a fal account: ${hosted.length} of the models also run on WaveSpeed. Stored on this computer, never in your projects.`}
+    >
+      <KeyField
+        kind="wavespeed"
+        configured={!!status?.wavespeed}
+        label="API key"
+        testable={false}
+        onSaved={() => {
+          refresh();
+          loadBalance();
+        }}
+        hint={
+          <>
+            <ExternalLinkButton href={WAVESPEED_LINKS.signup}>Create an account</ExternalLinkButton> ·{" "}
+            <ExternalLinkButton href={WAVESPEED_LINKS.keys}>Manage my keys</ExternalLinkButton> ·{" "}
+            <ExternalLinkButton href={WAVESPEED_LINKS.dashboard}>Top up</ExternalLinkButton>. A developer key: billing keys can&apos;t run models.
+          </>
+        }
+      />
+      {status?.wavespeed && (
+        <div className="mt-3 space-y-3 border-t border-line pt-3 text-[12px]">
+          <div className="flex items-center gap-2">
+            <span className="text-muted">Balance</span>
+            {balance.busy ? (
+              <Loader2 size={13} className="animate-spin text-muted" />
+            ) : balance.error ? (
+              <span className="text-red-300">{balance.error}</span>
+            ) : (
+              <span className="tabular-nums">${(balance.value ?? 0).toFixed(2)}</span>
+            )}
+            <button className="text-muted hover:text-fg" onClick={loadBalance} title="Refresh (also tests the key)">
+              <RefreshCw size={12} />
+            </button>
+          </div>
+          {both ? (
+            <p className="text-muted">
+              Who runs the models is chosen in <a href="#provider" className="text-accent hover:underline">Provider</a>, at the top of Settings.
+            </p>
+          ) : !status.main ? (
+            <p className="text-muted">
+              No fal key: models run on WaveSpeed. Those it doesn&apos;t host are marked “fal only” in the library, as are H3 Max Recast, the LLM
+              tools, Camera angles and the Seedance 2.5 Draft.
+            </p>
+          ) : null}
+          <details>
+            <summary className="cursor-pointer text-muted hover:text-fg">Models hosted by WaveSpeed ({hosted.length})</summary>
+            <p className="mt-1.5 leading-relaxed text-muted">{hosted.map((m) => m.label).join(" · ")}</p>
+          </details>
+        </div>
+      )}
     </Section>
   );
 }
@@ -769,7 +931,9 @@ function CoffeeSection() {
 }
 
 const SECTIONS: [string, string][] = [
+  ["provider", "Provider"],
   ["keys", "API key"],
+  ["wavespeed", "WaveSpeed"],
   ["byteplus", "BytePlus"],
   ["costs", "Costs"],
   ["storage", "Storage"],
@@ -789,7 +953,9 @@ export default function Settings() {
         ))}
       </nav>
       <div className="space-y-6 pb-16">
+        <ProviderSection />
         <KeysSection />
+        <WaveSpeedSection />
         <BytePlusSection />
         <CostsSection />
         <StorageSection />

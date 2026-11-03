@@ -60,6 +60,15 @@ fn pieces(duration: f64, max: f64, min: f64) -> Vec<(f64, f64)> {
     (0..n).map(|i| (i as f64 * len, len)).collect()
 }
 
+/// Where to cut a source of `duration` seconds on a provider that takes it
+/// whole when it fits (WaveSpeed): the whole, or equal pieces.
+pub fn cuts(def: &ModelDef, params: &HashMap<String, String>, duration: f64) -> Vec<(f64, f64)> {
+    match max_piece(def, params) {
+        Some(max) if duration > max => pieces(duration, max, min_piece(def)),
+        _ => vec![(0.0, duration)],
+    }
+}
+
 /// One segment of a source cut into pieces. Kept in the node's `pieces`
 /// output, so each can be watched, redone or downloaded before the user
 /// decides to join them.

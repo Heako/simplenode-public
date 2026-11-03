@@ -143,12 +143,19 @@ pub fn parse(doc: &Value) -> Vec<Setting> {
     let Some(input) = request_schema(doc) else {
         return Vec::new();
     };
+    from_schema(input, components, &[])
+}
+
+/// Settings of a JSON schema's properties. Also used for WaveSpeed, whose
+/// catalog gives each model's request schema; `skip` adds inputs the app
+/// fills itself on that provider.
+pub fn from_schema(input: &Value, components: &Value, skip: &[&str]) -> Vec<Setting> {
     let Some(props) = input["properties"].as_object() else { return Vec::new() };
 
     let mut settings = Vec::new();
     for (key, prop) in props {
         // Media URLs are wired through ports, not typed in.
-        if MANAGED.contains(&key.as_str()) || key.ends_with("_url") || key.ends_with("_urls") {
+        if MANAGED.contains(&key.as_str()) || skip.contains(&key.as_str()) || key.ends_with("_url") || key.ends_with("_urls") {
             continue;
         }
         let mut alts = Vec::new();

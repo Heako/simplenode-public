@@ -13,9 +13,12 @@ export type NodeKind =
   | "router"
   | "concat"
   | "crop"
+  | "frame"
   | "enhancer"
   | "describer"
   | "videoDescriber"
+  | "motionPrompt"
+  | "upscale"
   | "list"
   | "gridCrop"
   | "angles"
@@ -63,6 +66,8 @@ export interface ModelDef {
   draft: boolean;
   /** Accepts a negative prompt. */
   negative: boolean;
+  /** Also hosted by WaveSpeed (src-tauri/src/wavespeed.rs). */
+  wavespeed?: boolean;
   /** Port label for the references when the generic one would mislead. */
   refsLabel: string | null;
   /** Extra media inputs (style images, mask, keyframes, audio…); `edit` ones only go with references. */
@@ -245,6 +250,8 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       };
     case "crop":
       return { inputs: [{ id: "image", label: "Image", type: "image" }], outputs: [{ id: "image", label: "Image", type: "image" }] };
+    case "frame":
+      return { inputs: [{ id: "video", label: "Video", type: "video" }], outputs: [{ id: "image", label: "Frame", type: "image" }] };
     case "compositor":
       return {
         inputs: [
@@ -282,6 +289,16 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       return { inputs: [{ id: "image", label: "Image", type: "image" }], outputs: [{ id: "text", label: "Text", type: "text" }] };
     case "videoDescriber":
       return { inputs: [{ id: "video", label: "Video", type: "video" }], outputs: [{ id: "text", label: "Text", type: "text" }] };
+    case "upscale":
+      return { inputs: [{ id: "video", label: "Video", type: "video" }], outputs: [{ id: "video", label: "Video", type: "video" }] };
+    case "motionPrompt":
+      return {
+        inputs: [
+          { id: "video", label: "Video", type: "video" },
+          { id: "notes", label: "Notes (optional)", type: "text", multiple: true },
+        ],
+        outputs: [{ id: "text", label: "Prompt", type: "text" }],
+      };
     case "recast": {
       const most = findModel(data.params.modelId)?.maxRefs ?? 1;
       return {
@@ -421,6 +438,8 @@ export function defaultParams(kind: NodeKind, modelId?: string): Record<string, 
       return { separator: "newline" };
     case "crop":
       return { aspect: "free", x: "0", y: "0", w: "100", h: "100" };
+    case "frame":
+      return { time: "0" };
     case "addAudio":
       return { offset: "0" };
     case "compositor":
@@ -448,10 +467,16 @@ export function defaultParams(kind: NodeKind, modelId?: string): Record<string, 
       return { model: DEFAULT_LLM, detail: "long" };
     case "videoDescriber":
       return { question: "", detailed: "false" };
+    case "upscale":
+      // fps "": the source's. look and fidelity are fal's only.
+      return { resolution: "1080p", quality: "standard", look: "aigc", fidelity: "high", fps: "", format: "h264", sound: "on" };
+    case "motionPrompt":
+      // "character": the outfit of the reference images; "video": the video's.
+      return { notes: "", outfit: "character" };
     case "recast":
       return { ...recastParams("replace"), prompt: recastPrompt("replace"), segment: "10" };
     case "bpPortrait":
-      return { name: "", group: "SimpleNode" };
+      return { name: "", group: "SimpleNode", existing: "" };
     case "bpSeedance":
       return { prompt: "", duration: "5", ratio: "adaptive", audio: "true", draft: "true", resolution: "1080p", seed: "" };
     case "bpSeedream":
@@ -503,9 +528,11 @@ export function libraryItems(models: ModelDef[]): LibraryItem[] {
     { key: "router", kind: "router", label: "Router", hint: "One input to several outputs", group: "tools" },
     { key: "concat", kind: "concat", label: "Prompt Concatenator", hint: "Join several texts", group: "tools" },
     { key: "crop", kind: "crop", label: "Crop", hint: "Crop an image", group: "tools" },
+    { key: "frame", kind: "frame", label: "Extract frame", hint: "One frame of a video as an image (free)", group: "tools" },
     { key: "enhancer", kind: "enhancer", label: "Prompt Enhancer", hint: "Enrich a prompt (LLM)", group: "text" },
     { key: "describer", kind: "describer", label: "Image Describer", hint: "Image → text (LLM)", group: "text" },
     { key: "videoDescriber", kind: "videoDescriber", label: "Video Describer", hint: "Video → text", group: "text" },
+    { key: "motionPrompt", kind: "motionPrompt", label: "Video → Prompt", hint: "A video's action as a timed prompt, to generate it again (LLM)", group: "tools" },
     { key: "compositor", kind: "compositor", label: "Compositor", hint: "Layers of images, videos and sounds", group: "video" },
     { key: "recast", kind: "recast", label: "Recast", hint: "Source video + character → new video", group: "video" },
     { key: "addAudio", kind: "addAudio", label: "Add sound", hint: "Puts a sound track on a video", group: "audio" },
@@ -522,5 +549,6 @@ export function libraryItems(models: ModelDef[]): LibraryItem[] {
     })),
     { key: "angleExport", kind: "angleExport", label: "Export angles", hint: "Save every shot in a folder", group: "outputs" },
     { key: "preview", kind: "preview", label: "Preview", hint: "Show a result", group: "outputs" },
+    { key: "upscale", kind: "upscale", label: "Upscale / Export", hint: "A video in 1080p, 2K or 4K, ready to download (AI)", group: "outputs" },
   ];
 }

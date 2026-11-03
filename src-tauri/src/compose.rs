@@ -341,6 +341,217 @@ pub async fn render(app: &AppHandle, canvas: &Canvas, layers: &[Layer]) -> Resul
     Ok(out)
 }
 
+// ---------------------------------------------------------------------------
+// Video tools done locally, in place of fal's (Recast segments, Add sound),
+// for those who run models on WaveSpeed: free, and no fal account needed.
+
+/// Runs ffmpeg into a new file of app storage; its last lines on failure.
+async fn ffmpeg_into(app: &AppHandle, ext: &str, args: Vec<String>) -> Result<PathBuf> {
+    let out = storage::new_path(app, ext)?;
+    let mut all = vec!["-y".to_owned(), "-v".to_owned(), "error".to_owned()];
+    all.extend(args);
+    all.push(out.to_string_lossy().into_owned());
+    let result = tokio::process::Command::new(tool("ffmpeg")?).args(&all).kill_on_drop(true).output().await?;
+    if !result.status.success() {
+        let _ = std::fs::remove_file(&out);
+        let log = String::from_utf8_lossy(&result.stderr);
+        let tail: Vec<&str> = log.lines().rev().take(3).collect();
+        return Err(AppError::Invalid(format!("ffmpeg: {}", tail.into_iter().rev().collect::<Vec<_>>().join(" "))));
+    }
+    Ok(out)
+}
+
+const H264: [&str; 8] = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"];
+
+/// Length of a video or sound, in seconds.
+pub async fn duration(path: &Path) -> Result<f64> {
+    probe(&path.to_string_lossy()).await?.duration.ok_or_else(|| AppError::Invalid("Unreadable media length".into()))
+}
+
+fn path_arg(p: &Path) -> String {
+    p.to_string_lossy().into_owned()
+}
+
+/// ffmpeg arguments (output excepted) for `len` seconds of `source` from
+/// `start`, re-encoded so the cut is exact.
+fn trim_args(source: &Path, start: f64, len: f64) -> Vec<String> {
+    let mut args = vec!["-ss".into(), num(start), "-i".into(), path_arg(source), "-t".into(), num(len)];
+    args.extend(H264.iter().map(|s| s.to_string()));
+    args.extend(["-c:a".into(), "aac".into(), "-movflags".into(), "+faststart".into()]);
+    args
+}
+
+/// The videos one after the other, at the first one's size. Re-encoded, which
+/// evens out the odd difference in frame rate; sound only if they all have some.
+fn concat_args(parts: &[PathBuf], probes: &[Probe]) -> Result<Vec<String>> {
+    let first = probes.first().ok_or_else(|| AppError::Invalid("Nothing to join".into()))?;
+    let (w, h) = (even(first.width as f64), even(first.height as f64));
+    let sound = probes.iter().all(|p| p.audio);
+    let mut args = Vec::new();
+    let mut graph = String::new();
+    for (i, part) in parts.iter().enumerate() {
+        args.extend(["-i".into(), path_arg(part)]);
+        graph.push_str(&format!("[{i}:v]scale={w}:{h},setsar=1,fps={FPS}[v{i}];"));
+    }
+    for i in 0..parts.len() {
+        graph.push_str(&format!("[v{i}]"));
+        if sound {
+            graph.push_str(&format!("[{i}:a]"));
+        }
+    }
+    graph.push_str(&format!("concat=n={}:v=1:a={}[v]{}", parts.len(), u8::from(sound), if sound { "[a]" } else { "" }));
+    args.extend(["-filter_complex".into(), graph, "-map".into(), "[v]".into()]);
+    if sound {
+        args.extend(["-map".into(), "[a]".into(), "-c:a".into(), "aac".into()]);
+    }
+    args.extend(H264.iter().map(|s| s.to_string()));
+    args.extend(["-movflags".into(), "+faststart".into()]);
+    Ok(args)
+}
+
+/// The video with `audio` as its only sound, starting `offset` seconds in;
+/// silence fills the rest, and the video keeps its length.
+fn replace_sound_args(video: &Path, audio: &Path, offset: f64) -> Vec<String> {
+    let delay = (offset.max(0.0) * 1000.0).round();
+    let mut args = vec!["-i".into(), path_arg(video), "-i".into(), path_arg(audio), "-filter_complex".into()];
+    args.push(format!("[1:a]adelay={delay}:all=1,afade=t=in:d={ANTI_CLICK},apad[a]"));
+    for a in ["-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-shortest", "-movflags", "+faststart"] {
+        args.push(a.into());
+    }
+    args
+}
+
+pub async fn trim(app: &AppHandle, source: &Path, start: f64, len: f64) -> Result<PathBuf> {
+    ffmpeg_into(app, "mp4", trim_args(source, start, len)).await
+}
+
+pub async fn concat(app: &AppHandle, parts: &[PathBuf]) -> Result<PathBuf> {
+    let probes = try_join_all(parts.iter().map(|p| async move { probe(&p.to_string_lossy()).await })).await?;
+    ffmpeg_into(app, "mp4", concat_args(parts, &probes)?).await
+}
+
+pub async fn replace_sound(app: &AppHandle, video: &Path, audio: &Path, offset: f64) -> Result<PathBuf> {
+    ffmpeg_into(app, "mp4", replace_sound_args(video, audio, offset)).await
+}
+
+/// How the Upscale node writes its file, done locally after the upscale.
+pub struct Export<'a> {
+    /// "h264" (MP4), "h265" (MP4, smaller) or "prores" (MOV, for editing).
+    pub format: &'a str,
+    /// New frame rate; 60 is interpolated (smooth motion), others are resampled.
+    pub fps: Option<u32>,
+    pub sound: bool,
+}
+
+impl Export<'_> {
+    /// Nothing to redo: the upscaler's MP4 as it is.
+    pub fn is_plain(&self) -> bool {
+        self.format == "h264" && self.fps.is_none() && self.sound
+    }
+
+    pub fn extension(&self) -> &'static str {
+        if self.format == "prores" { "mov" } else { "mp4" }
+    }
+}
+
+fn export_args(source: &Path, export: &Export) -> Vec<String> {
+    let mut args = vec!["-i".to_owned(), path_arg(source)];
+    if let Some(fps) = export.fps {
+        let filter = if fps >= 50 { format!("minterpolate=fps={fps}:mi_mode=mci:mc_mode=aobmc:vsbmc=1") } else { format!("fps={fps}") };
+        args.extend(["-vf".to_owned(), filter]);
+    }
+    let video: &[&str] = match export.format {
+        "h265" => &["-c:v", "libx265", "-preset", "medium", "-crf", "18", "-tag:v", "hvc1", "-pix_fmt", "yuv420p"],
+        "prores" => &["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"],
+        _ => &["-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p"],
+    };
+    args.extend(video.iter().map(|s| s.to_string()));
+    if !export.sound {
+        args.push("-an".into());
+    } else if export.format == "prores" {
+        args.extend(["-c:a".into(), "pcm_s16le".into()]);
+    } else {
+        args.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "192k".into()]);
+    }
+    if export.format != "prores" {
+        args.extend(["-movflags".into(), "+faststart".into()]);
+    }
+    args
+}
+
+/// The upscaled video re-encoded as `export` says, in app storage.
+pub async fn export(app: &AppHandle, source: &Path, export: &Export<'_>) -> Result<PathBuf> {
+    ffmpeg_into(app, export.extension(), export_args(source, export)).await
+}
+
+/// A video sampled into grids of frames, for a vision LLM: it takes few
+/// images, and one tile per half second keeps the motion readable.
+pub struct Sheets {
+    pub paths: Vec<PathBuf>,
+    /// Seconds between two tiles.
+    pub step: f64,
+    pub duration: f64,
+    pub cols: u32,
+    pub rows: u32,
+}
+
+/// Most sheets a vision LLM call takes (fal's and WaveSpeed's any-llm/vision).
+const MAX_SHEETS: f64 = 10.0;
+const SHEET_COLS: u32 = 4;
+const SHEET_ROWS: u32 = 3;
+
+/// Seconds between tiles: every half second, less often for long videos so
+/// they still fit in `MAX_SHEETS`.
+fn sheet_step(duration: f64) -> f64 {
+    let tiles = MAX_SHEETS * f64::from(SHEET_COLS * SHEET_ROWS);
+    let step = (duration / tiles).max(0.5);
+    (step * 10.0).ceil() / 10.0
+}
+
+fn sheet_args(source: &str, step: f64, pattern: &str) -> Vec<String> {
+    // Tiles 288 px wide when upright, 480 when landscape.
+    let filter = format!("fps=1/{},scale='if(gt(iw,ih),480,288)':-2,tile={SHEET_COLS}x{SHEET_ROWS}", num(step));
+    ["-y", "-v", "error", "-i", source, "-vf", &filter, "-q:v", "3", pattern].iter().map(|s| s.to_string()).collect()
+}
+
+/// The video as contact sheets in app storage; the caller removes them.
+pub async fn contact_sheets(app: &AppHandle, source: &str) -> Result<Sheets> {
+    let source = if source.starts_with("http") { source.to_owned() } else { path_arg(&storage::owned_path(app, source)?) };
+    let duration = probe(&source).await?.duration.ok_or_else(|| AppError::Invalid("Unreadable video length".into()))?;
+    let step = sheet_step(duration);
+    let base = storage::new_path(app, "jpg")?;
+    let stem = base.file_stem().and_then(|s| s.to_str()).unwrap_or("sheet").to_owned();
+    let dir = base.parent().map(Path::to_path_buf).unwrap_or_default();
+    let pattern = dir.join(format!("{stem}-%02d.jpg"));
+    let result = tokio::process::Command::new(tool("ffmpeg")?)
+        .args(sheet_args(&source, step, &pattern.to_string_lossy()))
+        .kill_on_drop(true)
+        .output()
+        .await?;
+    let paths: Vec<PathBuf> = (1..=MAX_SHEETS as usize + 1).map(|i| dir.join(format!("{stem}-{i:02}.jpg"))).filter(|p| p.exists()).collect();
+    if !result.status.success() || paths.is_empty() {
+        for p in &paths {
+            let _ = std::fs::remove_file(p);
+        }
+        return Err(AppError::Invalid(format!("ffmpeg: {}", String::from_utf8_lossy(&result.stderr).lines().last().unwrap_or("no frame"))));
+    }
+    Ok(Sheets { paths, step, duration, cols: SHEET_COLS, rows: SHEET_ROWS })
+}
+
+/// ffmpeg arguments (output excepted) for the frame `at` seconds into `source`.
+fn frame_args(source: &str, at: f64) -> Vec<String> {
+    vec!["-ss".into(), num(at), "-i".into(), source.to_owned(), "-frames:v".into(), "1".into()]
+}
+
+/// The frame of a video `at` seconds in, as a PNG. Clamped inside the video:
+/// past its end ffmpeg would write nothing.
+pub async fn frame(app: &AppHandle, source: &str, at: f64) -> Result<PathBuf> {
+    let source = if source.starts_with("http") { source.to_owned() } else { path_arg(&storage::owned_path(app, source)?) };
+    let length = probe(&source).await?.duration.unwrap_or(0.0);
+    let at = if at.is_finite() { at.clamp(0.0, (length - 0.05).max(0.0)) } else { 0.0 };
+    ffmpeg_into(app, "png", frame_args(&source, at)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -394,6 +605,40 @@ mod tests {
         assert!(graph.contains("setpts=PTS+4/TB"), "{graph}");
         assert!(graph.contains("adelay=4000:all=1"), "{graph}");
         assert!(graph.contains("enable='between(t,4,10)'"), "{graph}");
+    }
+
+    #[test]
+    fn exports_interpolate_to_60_fps_and_drop_sound_on_request() {
+        let smooth = Export { format: "prores", fps: Some(60), sound: false };
+        let args = export_args(Path::new("/v.mp4"), &smooth);
+        assert!(arg_after(&args, "-vf").starts_with("minterpolate=fps=60"));
+        assert_eq!(arg_after(&args, "-c:v"), "prores_ks");
+        assert!(args.contains(&"-an".to_owned()));
+        assert_eq!(smooth.extension(), "mov");
+        let film = Export { format: "h265", fps: Some(24), sound: true };
+        let args = export_args(Path::new("/v.mp4"), &film);
+        assert_eq!(arg_after(&args, "-vf"), "fps=24");
+        assert_eq!(arg_after(&args, "-c:a"), "aac");
+        assert!(Export { format: "h264", fps: None, sound: true }.is_plain());
+    }
+
+    #[test]
+    fn sheets_take_a_tile_every_half_second_up_to_ten_sheets() {
+        assert_eq!(sheet_step(23.0), 0.5);
+        assert_eq!(sheet_step(60.0), 0.5);
+        let step = sheet_step(300.0);
+        assert!((300.0 / step).ceil() <= 120.0, "{step}");
+        let args = sheet_args("/v.mp4", 0.5, "/o-%02d.jpg");
+        assert!(arg_after(&args, "-vf").starts_with("fps=1/0.5,"));
+        assert!(arg_after(&args, "-vf").ends_with("tile=4x3"));
+    }
+
+    #[test]
+    fn a_frame_is_seeked_before_the_input() {
+        let args = frame_args("/v.mp4", 2.5);
+        assert_eq!(arg_after(&args, "-ss"), "2.5");
+        assert!(args.iter().position(|a| a == "-ss") < args.iter().position(|a| a == "-i"));
+        assert_eq!(arg_after(&args, "-frames:v"), "1");
     }
 
     #[test]
@@ -511,6 +756,34 @@ mod ffmpeg_tests {
             .unwrap();
         let audio: f64 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
         assert!((audio - 10.0).abs() < 0.2, "{audio}");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    #[ignore]
+    fn cuts_joins_and_replaces_sound() {
+        let dir = std::env::temp_dir().join(format!("compose-tools-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let p = |n: &str| dir.join(n);
+        let gen = |args: &str| run(&args.split(' ').map(String::from).collect::<Vec<_>>());
+        gen(&format!("-y -v error -f lavfi -i testsrc=s=320x240:d=9:r=30 -f lavfi -i sine=d=9 -shortest -pix_fmt yuv420p {}", p("src.mp4").display()));
+        gen(&format!("-y -v error -f lavfi -i sine=f=660:d=2 {}", p("beep.wav").display()));
+        let with_out = |mut args: Vec<String>, out: &str| {
+            args.splice(0..0, ["-y".to_owned(), "-v".to_owned(), "error".to_owned()]);
+            args.push(p(out).to_string_lossy().into_owned());
+            run(&args);
+            let path = p(out).to_string_lossy().into_owned();
+            tauri::async_runtime::block_on(async { probe(&path).await }).unwrap()
+        };
+        let a = with_out(trim_args(&p("src.mp4"), 0.0, 4.5), "a.mp4");
+        let b = with_out(trim_args(&p("src.mp4"), 4.5, 4.5), "b.mp4");
+        assert!((a.duration.unwrap() - 4.5).abs() < 0.15 && (b.duration.unwrap() - 4.5).abs() < 0.15);
+        let joined = with_out(concat_args(&[p("a.mp4"), p("b.mp4")], &[a, b]).unwrap(), "joined.mp4");
+        assert!((joined.duration.unwrap() - 9.0).abs() < 0.3, "{:?}", joined.duration);
+        assert!(joined.audio);
+        let dubbed = with_out(replace_sound_args(&p("joined.mp4"), &p("beep.wav"), 1.0), "dubbed.mp4");
+        // The video keeps its length, padded with silence after the sound.
+        assert!((dubbed.duration.unwrap() - 9.0).abs() < 0.3, "{:?}", dubbed.duration);
         std::fs::remove_dir_all(dir).ok();
     }
 
