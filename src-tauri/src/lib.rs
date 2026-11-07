@@ -140,6 +140,16 @@ fn upscale_cost(resolution: String, quality: String, seconds: f64) -> Result<Opt
     Ok(on_wavespeed.then(|| rate * seconds.max(1.0).ceil()))
 }
 
+/// What a Voice or Talking avatar node costs on WaveSpeed (none on fal, whose
+/// price isn't told before): characters of text, or seconds of audio.
+#[tauri::command]
+fn speech_cost(kind: String, amount: f64) -> Result<Option<f64>> {
+    let on_wavespeed = account::provider()? == account::Provider::WaveSpeed;
+    let rate = if kind == "avatar" { wavespeed::AVATAR_PER_SECOND } else { wavespeed::VOICE_PER_CHARACTER };
+    let amount = if kind == "avatar" { amount.max(1.0).ceil() } else { amount.max(1.0) };
+    Ok(on_wavespeed.then_some(rate * amount))
+}
+
 #[tauri::command]
 fn camera_shots() -> &'static [angles::Shot] {
     angles::SHOTS
@@ -320,6 +330,7 @@ pub fn run() {
             crop_image,
             extract_frame,
             upscale_cost,
+            speech_cost,
             mcp_status,
             mcp_configure,
             mcp_regenerate_token,

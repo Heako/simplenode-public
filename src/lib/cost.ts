@@ -58,8 +58,13 @@ const SEEDANCE_VIDEO_INPUT_FACTOR = 0.6;
 /** Used when a reference video's length isn't known yet: the longest it may be. */
 const SEEDANCE_MAX_INPUT_SECONDS = 30;
 
+/** Seedance 2.5 reference-to-video with images only: billed like a plain render, its draft a setting. */
+const SEEDANCE_IMAGE_REFERENCE = "seedance-2.5-reference";
+
 export function isSeedance25(modelId: string | undefined) {
-  return modelId === "seedance-2.5" || modelId === "seedance-2.5-draft" || SEEDANCE_REFERENCE.has(modelId ?? "");
+  return (
+    modelId === "seedance-2.5" || modelId === "seedance-2.5-draft" || modelId === SEEDANCE_IMAGE_REFERENCE || SEEDANCE_REFERENCE.has(modelId ?? "")
+  );
 }
 
 export function isSeedanceReference(modelId: string | undefined) {
@@ -89,7 +94,7 @@ export function seedanceEstimate(
 ): SeedanceEstimate | null {
   if (!isSeedance25(modelId)) return null;
   const reference = isSeedanceReference(modelId);
-  const draft = modelId === "seedance-2.5-draft" || (reference && params.draft !== "false");
+  const draft = modelId === "seedance-2.5-draft" || ((reference || modelId === SEEDANCE_IMAGE_REFERENCE) && params.draft !== "false");
   const res = resolution ?? (draft ? "480p" : params.resolution || "720p");
   const surface = SEEDANCE_SURFACES[res];
   // fal bills a reference video's seconds too (input + output), at 0.6 × the token price.

@@ -24,6 +24,9 @@ pub const TRIM_VIDEO_ENDPOINT: &str = "fal-ai/workflow-utilities/trim-video";
 pub const MERGE_VIDEOS_ENDPOINT: &str = "fal-ai/ffmpeg-api/merge-videos";
 pub const MERGE_AUDIO_VIDEO_ENDPOINT: &str = "fal-ai/ffmpeg-api/merge-audio-video";
 pub const UPSCALE_VIDEO_ENDPOINT: &str = "fal-ai/bytedance-upscaler/upscale/video";
+pub const UPSCALE_IMAGE_ENDPOINT: &str = "fal-ai/seedvr/upscale/image";
+pub const VOICE_ENDPOINT: &str = "fal-ai/elevenlabs/tts/eleven-v3";
+pub const AVATAR_ENDPOINT: &str = "fal-ai/kling-video/ai-avatar/v2/pro";
 
 /// What one model call sends besides the model's own params.
 pub struct ModelCall<'a> {
@@ -233,6 +236,37 @@ impl Fal {
         let mut input = settings;
         input["video_url"] = json!(video_url);
         let out = self.subscribe(UPSCALE_VIDEO_ENDPOINT, input).await?;
+        out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
+    }
+
+    /// An image upscaled with SeedVR2, its short side to `target` (1440p or
+    /// 2160p), as `format` (png, jpg or webp). Returns the image URL.
+    pub async fn upscale_image(&self, image: &str, target: &str, format: &str) -> Result<String> {
+        let input = json!({
+            "image_url": image,
+            "upscale_mode": "target",
+            "target_resolution": target,
+            "output_format": format,
+            "enable_safety_checker": false,
+        });
+        let out = self.subscribe(UPSCALE_IMAGE_ENDPOINT, input).await?;
+        out["image"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
+    }
+
+    /// Speech from ElevenLabs v3 in one of its premade voices.
+    pub async fn speak(&self, text: &str, voice: &str, stability: f64) -> Result<String> {
+        let input = json!({ "text": text, "voice": voice, "stability": stability });
+        let out = self.subscribe(VOICE_ENDPOINT, input).await?;
+        out["audio"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
+    }
+
+    /// Kling AI Avatar: the image speaking the audio, lips in sync.
+    pub async fn talking_avatar(&self, image: &str, audio_url: &str, prompt: &str) -> Result<String> {
+        let mut input = json!({ "image_url": image, "audio_url": audio_url });
+        if !prompt.trim().is_empty() {
+            input["prompt"] = json!(prompt.trim());
+        }
+        let out = self.subscribe(AVATAR_ENDPOINT, input).await?;
         out["video"]["url"].as_str().map(str::to_owned).ok_or_else(|| AppError::Fal("empty response".into()))
     }
 

@@ -90,7 +90,7 @@ Model activation [S1][S3]: balance > USD 30, or an AI Savings Plan ≥ USD 30, o
 - Official examples 16:9, 5 s, without video input: 480p **$0.514** ($0.103/s), 720p $1.156, 1080p **$2.843** ($0.569/s).
 - Draft: billed as 480p; finalizing billed at the target resolution (1080p).
 - Seedream [S7]: `dola-seedream-5-0-pro-260628` $0.045 per image up to 2.61 MP (≤ 1.5K), $0.09 above (2K); input images: the first is free, $0.003 each after that. `dola-seedream-5-0-flash-260915` $0.018, free inputs. `seedream-5-0-lite-260128` $0.035.
-- Portraits (CreateAsset): no per-call price in the pages read; depends on the Advanced Creation Rights (purchase guide not read). CreateAsset limits depend on the rights type.
+- Portraits (CreateAsset): no per-call price; they need Advanced Creation Rights. Tiers ([purchase guide](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/seedance-2-0-purchase-guide), read 2026-11-03): Basic (free) — no virtual portrait upload, console or API; Entry (free) — virtual portraits by console and API, 50 assets / 50 groups, 3 QPM, needs an enterprise-verified account; Advanced ($1,400/month) — 1M assets, 120 QPM; Premium ($4,200/month) — 5M assets, 300 QPM. Assets created in Entry are not deleted when a paid tier lapses.
 - Seedance 2.5 RPM / concurrency: deferred to the "Model list", **not recorded**.
 
 ## Live checks

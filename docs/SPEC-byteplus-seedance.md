@@ -1,8 +1,10 @@
 # Cahier des charges — Fournisseur BytePlus ModelArk (Seedance 2.5 avec personnage IA)
 
-Version 1 — 2 nov 2026
+Version 2 — 3 nov 2026 (version 1 : 2 nov 2026)
 Destinataire : agent de développement (Antigravity) travaillant sur ce dépôt.
-Lire `CLAUDE.md` avant de commencer. Tous les textes visibles dans l'app sont en français.
+Lire `CLAUDE.md` avant de commencer. **Depuis novembre 2026, tous les textes visibles dans l'app sont en anglais** : les messages cités en français dans cette spec sont à écrire en anglais dans l'app.
+
+> **Changements de la version 2** : formules de droits BytePlus vérifiées (§ 2, § 9) ; le nœud Portrait accepte un identifiant d'asset existant et explique les refus pour cause de droits (§ 5.2, déjà fait) ; guide des Réglages corrigé (§ 5.1).
 
 ---
 
@@ -18,6 +20,7 @@ L'utilisateur produit des vidéos d'un personnage récurrent **généré par IA*
 - Cette règle vient de ByteDance et s'applique chez tous les revendeurs (fal, Replicate, ComfyUI…). **fal ne propose aucune voie autorisée** pour la lever.
 - **BytePlus ModelArk**, la plateforme officielle de ByteDance, propose deux voies autorisées :
   - **Voie A — bibliothèque privée de portraits virtuels.** On y dépose un personnage IA. BytePlus fait une revue de sécurité, puis l'asset reçoit un identifiant `asset://<id>`, utilisable dans une tâche Seedance avec le rôle `reference_image`. Conditions : le personnage ne ressemble à aucune personne réelle, n'est ni copié ni détourné, ne porte aucun logo de marque. L'activation des « Advanced Creation Rights » et la signature d'une lettre d'autorisation dans la console sont requises à la première création de groupe.
+    - **Formules de droits** ([guide d'achat BytePlus](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/seedance-2-0-purchase-guide), vérifié le 3 nov 2026) : *Basic* (gratuite) n'autorise **aucun** portrait virtuel, ni par l'API ni par la console ; *Entry* (**gratuite**, 50 assets) les autorise, par la console et par l'API ; *Advanced* (1 400 $/mois) et *Premium* (4 200 $/mois) ne servent qu'aux gros volumes. Entry demande un **compte entreprise vérifié** (extrait d'immatriculation), validé par BytePlus en 1 à 2 jours ouvrés. Elle se trouve dans la console : *Model activation → Advanced Creation Rights*, carte « Free Version ».
   - **Voie B — sorties de confiance.** Une image avec visage générée par un modèle BytePlus (par ex. Seedream) **sur le même compte et depuis moins de 30 jours** est acceptée comme entrée par Seedance 2.0 / 2.5.
 
 ## 3. Objectif
@@ -48,11 +51,12 @@ Sur `docs.byteplus.com` (section ModelArk), vérifier les points suivants et les
 - Nouveau bloc « BytePlus ModelArk » dans Réglages : clé API (ou AK/SK selon 0.1), région, bouton « Tester la connexion ».
 - Stockage identique à celui de la clé fal, dans le fichier privé de l'app (`account.rs`). La clé n'apparaît jamais dans les logs.
 - BytePlus est **optionnel** : sans clé, l'app fonctionne comme aujourd'hui. Les nœuds BytePlus restent visibles mais affichent « Ajoutez votre clé BytePlus dans Réglages » au lieu de se lancer.
-- Sous le champ, un court guide en français avec liens vers la console BytePlus : créer un compte ModelArk, activer les « Advanced Creation Rights » (nécessaires aux portraits virtuels), signer la lettre d'autorisation à la création du premier groupe de portraits, créer une clé API. Ces étapes se font dans la console BytePlus, par l'utilisateur ; l'app ne les automatise pas.
+- Sous le champ, un court guide avec liens vers la console BytePlus : créer un compte ModelArk, **faire vérifier le compte en tant qu'entreprise**, activer la formule **gratuite Entry** des « Advanced Creation Rights » (*Model activation → Advanced Creation Rights* ; la formule Basic n'autorise aucun portrait virtuel), signer la lettre d'autorisation à la création du premier groupe de portraits, créer une clé API. Ces étapes se font dans la console BytePlus, par l'utilisateur ; l'app ne les automatise pas.
 - Le premier lancement d'un nœud BytePlus rappelle que la facturation passe par le compte BytePlus de l'utilisateur, avec ses propres tarifs et quotas.
 
 ### 5.2 Nœud « Portrait IA (BytePlus) » — voie A
-- **Entrée** : une image. **Paramètres** : nom du portrait (ex. « Nora »), groupe.
+- **Entrée** : une image. **Paramètres** : nom du portrait (ex. « Nora »), groupe, et **« Existing asset ID »** (fait) : un `asset://asset-…` ajouté à la main dans la console remplace l'envoi ; le nœud ne fait alors que vérifier son statut de revue.
+- **Refus pour cause de droits** (fait) : une erreur 403, ou un message parlant de droits ou d'abonnement, affiche que l'envoi demande les Advanced Creation Rights, que la formule gratuite Entry suffit après vérification de l'entreprise, ou qu'on peut coller un identifiant existant ; le texte exact de BytePlus suit entre parenthèses.
 - **Action** : envoie l'image dans la bibliothèque de portraits virtuels, puis interroge le statut jusqu'à la fin de la revue.
 - **Affichage** : statut (« En revue », « Validé », « Refusé » avec le motif renvoyé par BytePlus).
 - **Sortie** : l'URI `asset://…`, gardée dans le projet. Relancer le nœud ne renvoie pas l'image si l'asset est déjà validé.
@@ -106,8 +110,8 @@ Messages clairs en français : clé invalide, région incorrecte, portrait refus
 
 ## 9. Prérequis côté utilisateur (à sa charge, comme pour fal.ai)
 Chaque utilisateur de SimpleNode qui veut les nœuds BytePlus doit, lui-même et sur son compte :
-- créer un compte BytePlus ModelArk, authentifié (personne ou entreprise selon les exigences de BytePlus) ;
-- activer les « Advanced Creation Rights » et signer la lettre d'autorisation dans la console à la création du premier groupe de portraits ;
+- créer un compte BytePlus ModelArk et le faire **vérifier en tant qu'entreprise** : sans cela, la formule gratuite Entry reste grisée ;
+- activer la formule **gratuite Entry** des « Advanced Creation Rights » (pas Advanced ni Premium, payantes), puis signer la lettre d'autorisation dans la console à la création du premier groupe de portraits ;
 - créer une clé API et la saisir dans les Réglages de SimpleNode ;
 - respecter les conditions BytePlus pour les portraits virtuels (personnage IA qui ne ressemble à aucune personne réelle, sans logo de marque) : il en est seul responsable.
 

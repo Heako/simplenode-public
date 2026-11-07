@@ -19,6 +19,9 @@ export type NodeKind =
   | "videoDescriber"
   | "motionPrompt"
   | "upscale"
+  | "upscaleImage"
+  | "voice"
+  | "avatar"
   | "list"
   | "gridCrop"
   | "angles"
@@ -94,13 +97,13 @@ export interface NodeData extends Record<string, unknown> {
 }
 
 export const PORT_COLORS: Record<PortType, string> = {
-  text: "#e8b04a",
-  image: "#8b7bff",
-  video: "#3ecfa0",
-  audio: "#4fb3ff",
-  views: "#e86fb5",
-  portrait: "#ff8a5c",
-  any: "#9a9aa3",
+  text: "var(--port-text)",
+  image: "var(--port-image)",
+  video: "var(--port-video)",
+  audio: "var(--port-audio)",
+  views: "var(--port-views)",
+  portrait: "var(--port-portrait)",
+  any: "var(--port-any)",
 };
 
 /** Mirrors `angles::Shot` in src-tauri. */
@@ -291,6 +294,19 @@ export function portsFor(data: Pick<NodeData, "kind" | "params">): { inputs: Por
       return { inputs: [{ id: "video", label: "Video", type: "video" }], outputs: [{ id: "text", label: "Text", type: "text" }] };
     case "upscale":
       return { inputs: [{ id: "video", label: "Video", type: "video" }], outputs: [{ id: "video", label: "Video", type: "video" }] };
+    case "upscaleImage":
+      return { inputs: [{ id: "image", label: "Image", type: "image" }], outputs: [{ id: "image", label: "Image", type: "image" }] };
+    case "voice":
+      return { inputs: [{ id: "text", label: "Text", type: "text", multiple: true }], outputs: [{ id: "audio", label: "Voice", type: "audio" }] };
+    case "avatar":
+      return {
+        inputs: [
+          { id: "image", label: "Character", type: "image" },
+          { id: "audio", label: "Voice", type: "audio" },
+          { id: "prompt", label: "Acting (optional)", type: "text", multiple: true },
+        ],
+        outputs: [{ id: "video", label: "Video", type: "video" }],
+      };
     case "motionPrompt":
       return {
         inputs: [
@@ -467,9 +483,16 @@ export function defaultParams(kind: NodeKind, modelId?: string): Record<string, 
       return { model: DEFAULT_LLM, detail: "long" };
     case "videoDescriber":
       return { question: "", detailed: "false" };
+    case "voice":
+      // A premade ElevenLabs voice, the same name on fal and WaveSpeed.
+      return { text: "", voice: "Matilda", stability: "0.5" };
+    case "avatar":
+      return { prompt: "" };
     case "upscale":
       // fps "": the source's. look and fidelity are fal's only.
       return { resolution: "1080p", quality: "standard", look: "aigc", fidelity: "high", fps: "", format: "h264", sound: "on" };
+    case "upscaleImage":
+      return { resolution: "4k", format: "png" };
     case "motionPrompt":
       // "character": the outfit of the reference images; "video": the video's.
       return { notes: "", outfit: "character" };
@@ -529,6 +552,7 @@ export function libraryItems(models: ModelDef[]): LibraryItem[] {
     { key: "concat", kind: "concat", label: "Prompt Concatenator", hint: "Join several texts", group: "tools" },
     { key: "crop", kind: "crop", label: "Crop", hint: "Crop an image", group: "tools" },
     { key: "frame", kind: "frame", label: "Extract frame", hint: "One frame of a video as an image (free)", group: "tools" },
+    { key: "upscaleImage", kind: "upscaleImage", label: "Upscale image", hint: "An image in 2K, 4K or 8K, sharper (AI, about a cent)", group: "tools" },
     { key: "enhancer", kind: "enhancer", label: "Prompt Enhancer", hint: "Enrich a prompt (LLM)", group: "text" },
     { key: "describer", kind: "describer", label: "Image Describer", hint: "Image → text (LLM)", group: "text" },
     { key: "videoDescriber", kind: "videoDescriber", label: "Video Describer", hint: "Video → text", group: "text" },
@@ -536,6 +560,8 @@ export function libraryItems(models: ModelDef[]): LibraryItem[] {
     { key: "compositor", kind: "compositor", label: "Compositor", hint: "Layers of images, videos and sounds", group: "video" },
     { key: "recast", kind: "recast", label: "Recast", hint: "Source video + character → new video", group: "video" },
     { key: "addAudio", kind: "addAudio", label: "Add sound", hint: "Puts a sound track on a video", group: "audio" },
+    { key: "voice", kind: "voice", label: "Voice", hint: "Text to speech, always the same voice (ElevenLabs v3)", group: "audio" },
+    { key: "avatar", kind: "avatar", label: "Talking avatar (Kling)", hint: "A character image speaks a voice, lips in sync", group: "video" },
     { key: "bpPortrait", kind: "bpPortrait", label: "AI Portrait (BytePlus)", hint: "AI character validated for Seedance", group: "image" },
     { key: "bpSeedream", kind: "bpSeedream", label: "Seedream (BytePlus)", hint: "BytePlus ModelArk · trusted image", group: "image" },
     { key: "bpSeedance", kind: "bpSeedance", label: "Seedance 2.5 (BytePlus)", hint: "BytePlus ModelArk · faces through portraits", group: "video" },

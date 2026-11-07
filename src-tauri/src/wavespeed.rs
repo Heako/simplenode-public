@@ -39,6 +39,16 @@ pub enum Refs {
     Named(&'static str),
 }
 
+/// ElevenLabs v3 text to speech, for the Voice node ($0.20 per 1,000 characters).
+pub const VOICE: &str = "elevenlabs/eleven-v3";
+pub const VOICE_PER_CHARACTER: f64 = 0.0002;
+/// Kling AI Avatar v2 Pro, for the Talking avatar node ($0.112 per second of audio).
+pub const AVATAR: &str = "kwaivgi/kling-v2-ai-avatar-pro";
+pub const AVATAR_PER_SECOND: f64 = 0.112;
+
+/// Image upscaler for the Upscale image node (2K, 4K or 8K; $0.01 a run).
+pub const IMAGE_UPSCALER: &str = "wavespeed-ai/image-upscaler";
+
 /// Video upscalers (720p to 4K) for the Upscale node: standard, and Pro
 /// (better detail and frame-to-frame consistency, 4 to 8 times the price).
 pub fn upscale_model(pro: bool) -> &'static str {
@@ -85,6 +95,7 @@ const fn video(model: &'static str, text: &'static str, edit: &'static str, end:
 pub static MODELS: &[Mapping] = &[
     image("nano-banana-pro", "google/nano-banana-pro/text-to-image", Some("google/nano-banana-pro/edit"), Refs::Images),
     image("nano-banana-2", "google/nano-banana-2/text-to-image", Some("google/nano-banana-2/edit"), Refs::Images),
+    image("seedream-5-pro", "bytedance/seedream-v5.0-pro", Some("bytedance/seedream-v5.0-pro/edit"), Refs::Images),
     image("seedream-5-lite", "bytedance/seedream-v5.0-lite", Some("bytedance/seedream-v5.0-lite/edit"), Refs::Images),
     image("seedream-4.5", "bytedance/seedream-v4.5", Some("bytedance/seedream-v4.5/edit"), Refs::Images),
     image("gpt-image-2", "openai/gpt-image-2/text-to-image", Some("openai/gpt-image-2/edit"), Refs::Images),
@@ -105,6 +116,25 @@ pub static MODELS: &[Mapping] = &[
     video("hailuo-02", "minimax/hailuo-02/t2v-standard", "minimax/hailuo-02/i2v-standard", Some("last_image")),
     video("wan-2.5", "alibaba/wan-2.5/text-to-video", "alibaba/wan-2.5/image-to-video", None),
     video("ltx-2", "wavespeed-ai/ltx-2.3/text-to-video", "wavespeed-ai/ltx-2.3/image-to-video", None),
+    // Reference-to-video with images only. WaveSpeed has no draft mode: the
+    // node's "480p draft" setting is dropped there, the video renders as set.
+    Mapping {
+        model: "seedance-2.5-reference",
+        text: None,
+        edit: Some("bytedance/seedance-2.5/reference-to-video"),
+        refs: Refs::Named("reference_images"),
+        end: None,
+        media: &[],
+    },
+    // H3 Max Reference isn't on WaveSpeed.
+    Mapping {
+        model: "minimax-h3-reference",
+        text: None,
+        edit: Some("wavespeed-ai/minimax-h3/reference-to-video"),
+        refs: Refs::Named("reference_images"),
+        end: None,
+        media: &[],
+    },
     // Seedance 2.5 with a reference video: WaveSpeed splits fal's one endpoint
     // in two, motion transfer (reference) and editing (video-edit).
     Mapping {

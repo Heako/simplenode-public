@@ -131,6 +131,9 @@ const ASPECT_KONTEXT: &[&str] = &["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2
 const SIZE_STD: &[&str] = &["square_hd", "square", "landscape_16_9", "portrait_16_9", "landscape_4_3", "portrait_4_3"];
 const SIZE_SEEDREAM_45: &[&str] =
     &["auto_2K", "auto_4K", "square_hd", "square", "landscape_16_9", "portrait_16_9", "landscape_4_3", "portrait_4_3"];
+/// Seedream 5.0 Pro: 2K at most, and the 1K / 1.5K automatic sizes.
+const SIZE_SEEDREAM_5_PRO: &[&str] =
+    &["auto_2K", "auto_1.5K", "auto_1K", "square_hd", "square", "landscape_16_9", "portrait_16_9", "landscape_4_3", "portrait_4_3"];
 const SIZE_SEEDREAM_5: &[&str] = &[
     "auto_2K", "auto_3K", "auto_4K", "square_hd", "square", "landscape_16_9", "portrait_16_9", "landscape_4_3", "portrait_4_3",
 ];
@@ -190,6 +193,22 @@ pub static MODELS: &[ModelDef] = &[
             select("aspect_ratio", "Aspect ratio", ASPECT_NANO, "1:1"),
             select("resolution", "Resolution", &["0.5K", "1K", "2K", "4K"], "1K"),
         ],
+    },
+    ModelDef {
+        id: "seedream-5-pro",
+        label: "Seedream 5.0 Pro",
+        provider: "ByteDance",
+        category: Category::Image,
+        text_endpoint: Some("bytedance/seedream/v5/pro/text-to-image"),
+        edit_endpoint: Some("bytedance/seedream/v5/pro/edit"),
+        ref_field: RefField::Urls,
+        max_refs: 10,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[select("image_size", "Size", SIZE_SEEDREAM_5_PRO, "auto_2K")],
     },
     ModelDef {
         id: "seedream-5-lite",
@@ -429,6 +448,50 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
             select("prompt_expansion_mode", "Prompt rewriting", &["balanced"], "balanced"),
         ],
     },
+    // Reference-to-video: the video follows the subjects and style of up to 9
+    // images, named "Image 1", "Image 2"… in the prompt. Needs at least one.
+    ModelDef {
+        id: "minimax-h3-reference",
+        label: "MiniMax H3 Reference",
+        provider: "MiniMax",
+        category: Category::Video,
+        text_endpoint: None,
+        edit_endpoint: Some("minimax/h3/reference-to-video"),
+        ref_field: RefField::ReferenceUrls,
+        max_refs: 9,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[media("target_audio_url", "Target audio", MediaKind::Audio, false, Mode::Both)],
+        params: &[
+            int("duration", "Duration (s)", &["5", "6", "8", "10", "12", "15"], "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE, "16:9"),
+            select("resolution", "Resolution", &["480P", "768P", "2K", "4K"], "2K"),
+        ],
+    },
+    ModelDef {
+        id: "minimax-h3-max-reference",
+        label: "MiniMax H3 Max Reference",
+        provider: "MiniMax",
+        category: Category::Video,
+        text_endpoint: None,
+        edit_endpoint: Some("minimax/h3-max/reference-to-video"),
+        ref_field: RefField::ReferenceUrls,
+        max_refs: 9,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[media("target_audio_url", "Target audio", MediaKind::Audio, false, Mode::Both)],
+        params: &[
+            int("duration", "Duration (s)", &["2", "3", "5", "6", "8", "10", "12", "15"], "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE, "16:9"),
+            select("resolution", "Resolution", &["480P", "768P", "1080P"], "768P"),
+            // Required by the schema; "balanced" is fal's documented default.
+            select("prompt_expansion_mode", "Prompt rewriting", &["balanced"], "balanced"),
+        ],
+    },
     ModelDef {
         id: "seedance-2.5",
         label: "Seedance 2.5",
@@ -448,6 +511,32 @@ pub static VIDEO_MODELS: &[ModelDef] = &[
             select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE_25, "auto").text_only(),
             select("resolution", "Resolution", &["480p", "720p", "1080p"], "720p"),
             toggle("generate_audio", "Audio", "true"),
+        ],
+    },
+    // Seedance 2.5 reference-to-video with images only: up to 30, named
+    // "@Image1", "@Image2"… in the prompt. Needs at least one.
+    ModelDef {
+        id: "seedance-2.5-reference",
+        label: "Seedance 2.5 Reference",
+        provider: "ByteDance",
+        category: Category::Video,
+        text_endpoint: None,
+        edit_endpoint: Some(SEEDANCE_25_REFERENCE),
+        ref_field: RefField::Urls,
+        max_refs: 30,
+        end_field: None,
+        draft: false,
+        negative: false,
+        refs_label: None,
+        media: &[],
+        params: &[
+            select("task", "Task", &["reference"], "reference"),
+            toggle("draft", "480p draft", "true"),
+            select("duration", "Duration (s)", SECONDS_SEEDANCE_25, "5"),
+            select("aspect_ratio", "Aspect ratio", ASPECT_SEEDANCE_25, "auto"),
+            select("resolution", "Resolution", &["480p", "720p", "1080p"], "720p"),
+            toggle("generate_audio", "Audio", "true"),
+            select("bitrate_mode", "Bitrate", &["high", "standard"], "high"),
         ],
     },
     // Seedance 2.5 with a reference video, the way Higgsfield's Genjutsu

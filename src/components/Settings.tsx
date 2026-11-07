@@ -3,7 +3,7 @@
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { Bot, Check, Waves, Clapperboard, Coffee, Copy, Eye, EyeOff, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
+import { Bot, Check, Waves, Moon, Sun, SunMoon, Monitor, Clapperboard, Coffee, Copy, Eye, EyeOff, ExternalLink, FolderOpen, KeyRound, Loader2, ReceiptText, RefreshCw, HardDrive, Heart, Info } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import ProviderIcon from "./ProviderIcon";
 import { useModels } from "@/lib/spec";
@@ -11,6 +11,7 @@ import { perSecondRows } from "@/lib/cost";
 import { useMcpSpend, type McpStatus } from "@/lib/mcp";
 import { BYTEPLUS_LINKS, useBytePlusKeys } from "@/lib/byteplus";
 import { WAVESPEED_LINKS, useKeys, type KeyStatus } from "@/lib/provider";
+import { useAppearance, type Appearance } from "@/lib/theme";
 
 type KeyKind = "main" | "billing" | "byteplus" | "byteplusAk" | "byteplusSk" | "wavespeed";
 
@@ -126,7 +127,7 @@ function KeyField({
     <div className="py-3 first:pt-0 last:pb-0">
       <div className="flex items-center gap-2">
         <span className="text-[13px]">{label}</span>
-        <span className={`rounded px-1.5 py-0.5 text-[10px] ${configured ? "bg-emerald-500/15 text-emerald-300" : "bg-panel-2 text-muted"}`}>
+        <span className={`rounded px-1.5 py-0.5 text-[10px] ${configured ? "bg-success-tint/15 text-success" : "bg-panel-2 text-muted"}`}>
           {configured ? "Set" : "Missing"}
         </span>
       </div>
@@ -156,7 +157,7 @@ function KeyField({
           </button>
         )}
         <button
-          className="rounded-lg px-2 py-1.5 text-[12px] text-red-300 disabled:opacity-40"
+          className="rounded-lg px-2 py-1.5 text-[12px] text-danger disabled:opacity-40"
           disabled={!configured || state.busy}
           onClick={() => act(() => invoke("set_fal_key", { kind, key: "" }), "Key deleted.")}
         >
@@ -165,11 +166,11 @@ function KeyField({
       </div>
       {state.busy && <Loader2 size={13} className="mt-2 animate-spin text-muted" />}
       {state.ok && (
-        <p className="mt-2 flex items-center gap-1 text-[12px] text-emerald-300">
+        <p className="mt-2 flex items-center gap-1 text-[12px] text-success">
           <Check size={12} /> {state.ok}
         </p>
       )}
-      {state.error && <p className="mt-2 text-[12px] text-red-300">{state.error}</p>}
+      {state.error && <p className="mt-2 text-[12px] text-danger">{state.error}</p>}
     </div>
   );
 }
@@ -213,6 +214,32 @@ function KeysSection() {
 }
 
 /** Who runs the models: fal.ai or WaveSpeed, at a glance and switched in one click. */
+/** Dark, light, or following macOS. */
+function AppearanceSection() {
+  const appearance = useAppearance((s) => s.appearance);
+  const setAppearance = useAppearance((s) => s.set);
+  const options: [Appearance, string, typeof Sun][] = [
+    ["dark", "Dark", Moon],
+    ["light", "Light", Sun],
+    ["system", "System", Monitor],
+  ];
+  return (
+    <Section id="appearance" icon={SunMoon} title="Appearance" description="The interface's colors. System follows the light or dark mode of macOS.">
+      <div className="inline-flex gap-1 rounded-lg bg-panel-2 p-1 text-[12px]">
+        {options.map(([value, label, Icon]) => (
+          <button
+            key={value}
+            className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 ${appearance === value ? "bg-panel text-fg shadow-sm shadow-shadow/20" : "text-muted hover:text-fg"}`}
+            onClick={() => setAppearance(value)}
+          >
+            <Icon size={13} /> {label}
+          </button>
+        ))}
+      </div>
+    </Section>
+  );
+}
+
 function ProviderSection() {
   const status = useKeys((s) => s.status);
   const refresh = useKeys((s) => s.refresh);
@@ -256,7 +283,7 @@ function ProviderSection() {
               onClick={() => c.key && choose(c.id)}
               onKeyDown={(e) => e.key === "Enter" && c.key && choose(c.id)}
               className={`rounded-lg border p-3 text-[12px] ${
-                active ? "border-accent bg-accent/10" : c.key ? "cursor-pointer border-line hover:border-[#4a4a52]" : "border-line opacity-70"
+                active ? "border-accent bg-accent/10" : c.key ? "cursor-pointer border-line hover:border-line-hover" : "border-line opacity-70"
               }`}
             >
               <div className="flex items-center gap-2">
@@ -264,7 +291,7 @@ function ProviderSection() {
                   {active && <span className="h-1.5 w-1.5 rounded-full bg-accent" />}
                 </span>
                 <span className="text-[13px] font-medium">{c.name}</span>
-                <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] ${c.key ? "bg-emerald-500/15 text-emerald-300" : "bg-panel-2 text-muted"}`}>
+                <span className={`ml-auto rounded px-1.5 py-0.5 text-[10px] ${c.key ? "bg-success-tint/15 text-success" : "bg-panel-2 text-muted"}`}>
                   {c.key ? "Key set" : "No key"}
                 </span>
               </div>
@@ -289,12 +316,12 @@ function ProviderSection() {
         The inspector shows a “WaveSpeed” badge on models that run there.
       </p>
       {switched && (
-        <p className="mt-2 rounded-md bg-sky-500/10 px-2.5 py-2 text-[11px] leading-snug text-sky-200">
+        <p className="mt-2 rounded-md bg-info-tint/10 px-2.5 py-2 text-[11px] leading-snug text-info">
           Switched to {switched}. Nodes use it from their next run; results and messages already on the canvas stay as they were until you
           run those nodes again.
         </p>
       )}
-      {error && <p className="mt-2 text-[12px] text-red-300">{error}</p>}
+      {error && <p className="mt-2 text-[12px] text-danger">{error}</p>}
     </Section>
   );
 }
@@ -352,7 +379,7 @@ function WaveSpeedSection() {
             {balance.busy ? (
               <Loader2 size={13} className="animate-spin text-muted" />
             ) : balance.error ? (
-              <span className="text-red-300">{balance.error}</span>
+              <span className="text-danger">{balance.error}</span>
             ) : (
               <span className="tabular-nums">${(balance.value ?? 0).toFixed(2)}</span>
             )}
@@ -464,7 +491,7 @@ function BytePlusSection() {
       </div>
       {test.busy && <Loader2 size={13} className="mt-2 animate-spin text-muted" />}
       {test.results?.map(([label, error]) => (
-        <p key={label} className={`mt-2 flex items-start gap-1 text-[12px] ${error ? "text-red-300" : "text-emerald-300"}`}>
+        <p key={label} className={`mt-2 flex items-start gap-1 text-[12px] ${error ? "text-danger" : "text-success"}`}>
           {error ? `${label}: ${error}` : <><Check size={12} className="mt-0.5" /> {label}: connected.</>}
         </p>
       ))}
@@ -488,8 +515,8 @@ function BytePlusSection() {
         <p className={step}>
           <span className="text-fg">3.</span>
           <span>
-            For portraits: activate the “Advanced Creation Rights”. When the first portrait group is created, BytePlus asks you to sign an authorization
-            letter. <ExternalLinkButton href={BYTEPLUS_LINKS.rights}>Advanced Creation Rights</ExternalLinkButton> ·{" "}
+            For portraits: get the account verified as a company, then activate the free “Entry” tier of the Advanced Creation Rights (the default
+            Basic tier allows no AI portrait). When the first portrait group is created, BytePlus asks you to sign an authorization letter. <ExternalLinkButton href={BYTEPLUS_LINKS.rights}>Advanced Creation Rights</ExternalLinkButton> ·{" "}
             <ExternalLinkButton href={BYTEPLUS_LINKS.portraits}>My portraits</ExternalLinkButton>
           </span>
         </p>
@@ -583,7 +610,7 @@ function CostsSection() {
       {spend.busy && <Loader2 size={14} className="mt-3 animate-spin text-muted" />}
       {spend.error && (
         <div className="mt-3 rounded-lg bg-panel-2 px-3 py-2.5 text-[12px] text-muted">
-          <span className="text-red-300">Spending unavailable</span> — {spend.error}
+          <span className="text-danger">Spending unavailable</span> — {spend.error}
         </div>
       )}
       {spend.data && (
@@ -629,7 +656,7 @@ function CostsSection() {
         />
       </div>
       {prices.busy && <Loader2 size={14} className="mt-3 animate-spin text-muted" />}
-      {prices.error && <p className="mt-3 text-[12px] text-red-300">{prices.error}</p>}
+      {prices.error && <p className="mt-3 text-[12px] text-danger">{prices.error}</p>}
       {prices.data &&
         (Object.keys(CATEGORY_TITLES) as PriceRow["category"][]).map((cat) => {
           const rows = shownPrices.filter((r) => r.category === cat);
@@ -703,7 +730,7 @@ function StorageSection() {
         </button>
         {confirming ? (
           <>
-            <button className="rounded-lg bg-red-500/80 px-3 py-1.5 text-[12px] font-medium" onClick={clean}>
+            <button className="rounded-lg bg-danger-tint/80 px-3 py-1.5 text-[12px] font-medium" onClick={clean}>
               Confirm deletion
             </button>
             <button className="rounded-lg px-3 py-1.5 text-[12px] text-muted" onClick={() => setConfirming(false)}>
@@ -744,7 +771,7 @@ function AboutSection() {
       <p className="mt-4 border-t border-line pt-3 text-[11px] text-muted">
         © {new Date().getFullYear()} LUDACOM SARL. SimpleNode by Ludacom. All rights reserved.
         <span className="mt-1 flex items-center gap-1">
-          Made with <Heart size={11} className="fill-[#ff4d6d] text-[#ff4d6d]" aria-label="love" /> Paris
+          Made with <Heart size={11} className="fill-love text-love" aria-label="love" /> Paris
         </span>
       </p>
     </Section>
@@ -801,11 +828,11 @@ function McpSection() {
         <label className="flex items-center gap-2">
           <input type="checkbox" checked={status.enabled} onChange={(e) => configure({ enabled: e.target.checked })} />
           Enable the MCP server
-          <span className={`ml-auto text-[11px] ${status.running ? "text-emerald-400" : "text-muted"}`}>
+          <span className={`ml-auto text-[11px] ${status.running ? "text-success" : "text-muted"}`}>
             {status.running ? `Listening on 127.0.0.1:${status.port}` : "Stopped"}
           </span>
         </label>
-        {(error || status.error) && <p className="rounded-md bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">{error || status.error}</p>}
+        {(error || status.error) && <p className="rounded-md bg-danger-tint/10 px-2.5 py-1.5 text-[11px] text-danger">{error || status.error}</p>}
 
         <div className="space-y-1.5">
           <div className="flex gap-1">
@@ -921,7 +948,7 @@ function CoffeeSection() {
     <Section id="coffee" icon={Coffee} title="Buy me a coffee" description="SimpleNode is free. If the app helps you, you can support its development.">
       <button
         onClick={() => openUrl("https://buymeacoffee.com/heako")}
-        className="inline-flex items-center gap-2 rounded-lg bg-[#ffdd00] px-4 py-2 text-[13px] font-medium text-black hover:brightness-95"
+        className="inline-flex items-center gap-2 rounded-lg bg-coffee px-4 py-2 text-[13px] font-medium text-on-coffee hover:brightness-95"
       >
         <Coffee size={15} /> Buy a coffee <ExternalLink size={12} />
       </button>
@@ -932,6 +959,7 @@ function CoffeeSection() {
 
 const SECTIONS: [string, string][] = [
   ["provider", "Provider"],
+  ["appearance", "Appearance"],
   ["keys", "API key"],
   ["wavespeed", "WaveSpeed"],
   ["byteplus", "BytePlus"],
@@ -954,6 +982,7 @@ export default function Settings() {
       </nav>
       <div className="space-y-6 pb-16">
         <ProviderSection />
+        <AppearanceSection />
         <KeysSection />
         <WaveSpeedSection />
         <BytePlusSection />

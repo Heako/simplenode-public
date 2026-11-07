@@ -1,7 +1,8 @@
 "use client";
 
 import { invoke } from "@tauri-apps/api/core";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState } from "react";
+import { initAppearance } from "@/lib/theme";
 import { useFlow } from "@/lib/store";
 import { useModels } from "@/lib/spec";
 import { listenToMcp } from "@/lib/mcp";
@@ -16,6 +17,9 @@ export default function App() {
   const loadModels = useModels((s) => s.load);
   // null until known; the guide shows again next launch if skipped.
   const [welcome, setWelcome] = useState<boolean | null>(null);
+
+  // Before the first paint, so a light theme doesn't flash dark.
+  useLayoutEffect(() => initAppearance(), []);
 
   // Load the model registry once; new model nodes read their defaults from it.
   useEffect(() => {

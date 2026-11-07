@@ -195,23 +195,23 @@ export default function CropEditor({
         />
         {toolbar && (
           // Only its buttons take clicks: the frame's top corners stay reachable underneath.
-          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-end gap-0.5 bg-gradient-to-b from-black/55 to-transparent px-1.5 pt-1.5 pb-4 [&>*]:pointer-events-auto">
+          <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-end gap-0.5 bg-gradient-to-b from-overlay/55 to-transparent px-1.5 pt-1.5 pb-4 [&>*]:pointer-events-auto">
             {toolbar}
           </div>
         )}
         {size && box && (
           <div
-            className="nodrag absolute cursor-move shadow-[0_0_0_9999px_rgba(0,0,0,0.6)] outline outline-1 outline-white/90"
+            className="nodrag absolute cursor-move shadow-[0_0_0_9999px_var(--crop-mask)] outline outline-1 outline-on-overlay/90"
             style={{ left: pct(box.x, size.w), top: pct(box.y, size.h), width: pct(box.w, size.w), height: pct(box.h, size.h) }}
             onPointerDown={(e) => start(e, null)}
           >
             {/* Rule of thirds. */}
-            <div className="pointer-events-none absolute inset-y-0 left-1/3 border-l border-dashed border-white/60" />
-            <div className="pointer-events-none absolute inset-y-0 left-2/3 border-l border-dashed border-white/60" />
-            <div className="pointer-events-none absolute inset-x-0 top-1/3 border-t border-dashed border-white/60" />
-            <div className="pointer-events-none absolute inset-x-0 top-2/3 border-t border-dashed border-white/60" />
+            <div className="pointer-events-none absolute inset-y-0 left-1/3 border-l border-dashed border-on-overlay/60" />
+            <div className="pointer-events-none absolute inset-y-0 left-2/3 border-l border-dashed border-on-overlay/60" />
+            <div className="pointer-events-none absolute inset-x-0 top-1/3 border-t border-dashed border-on-overlay/60" />
+            <div className="pointer-events-none absolute inset-x-0 top-2/3 border-t border-dashed border-on-overlay/60" />
             {corners.map(([corner, place]) => (
-              <div key={corner} className={`absolute h-4 w-4 border-white ${place}`} onPointerDown={(e) => start(e, corner)} />
+              <div key={corner} className={`absolute h-4 w-4 border-on-overlay ${place}`} onPointerDown={(e) => start(e, corner)} />
             ))}
           </div>
         )}

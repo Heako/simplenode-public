@@ -14,7 +14,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 import { nanoid } from "nanoid";
 import { BILLING_ACK_KEY, BILLING_NOTICE, isBytePlusKind } from "./byteplus";
 import { create } from "zustand";
-import { arrange } from "./layout";
+import { arrange, tidy } from "./layout";
 import { propagate } from "./live";
 import type { Project } from "./projects";
 import {
@@ -74,7 +74,7 @@ async function acknowledgeBytePlusBilling(nodes: FlowNode[], edges: Edge[], targ
 /** Nodes that generate media with a model and keep every result in `history`. */
 export function hasHistory(node: FlowNode) {
   const { kind } = node.data;
-  return kind === "model" || kind === "recast" || kind === "addAudio" || kind === "upscale" || kind === "bpSeedance" || kind === "bpSeedream";
+  return kind === "model" || kind === "recast" || kind === "addAudio" || kind === "upscale" || kind === "upscaleImage" || kind === "voice" || kind === "avatar" || kind === "bpSeedance" || kind === "bpSeedream";
 }
 
 /** A connection dragged from a port and dropped somewhere other than a port. */
@@ -154,7 +154,8 @@ interface FlowState {
    * Lays nodes out left to right along their links: the selection when two
    * or more nodes are selected, otherwise the whole canvas.
    */
-  arrangeNodes: () => void;
+  /** Tidies the selection (or every node): same columns and order, tighter and aligned. `full` lays it out anew. */
+  arrangeNodes: (full?: boolean) => void;
   /** Makes an earlier result of a model node its current output again. */
   pickHistory: (nodeId: string, index: number) => void;
   /** Makes this image the project's cover on the home page; null removes it. */
@@ -205,6 +206,25 @@ function renameModels(nodes: FlowNode[]): FlowNode[] {
  * Projects saved before numbered reference inputs: the edges into a model's
  * single `refs` input become Image 1, Image 2… in the order they were made.
  */
+/** Link colors saved as hex before the themes: now the port's theme variable. */
+const OLD_PORT_HEX: Record<string, string> = {
+  "#e8b04a": PORT_COLORS.text,
+  "#8b7bff": PORT_COLORS.image,
+  "#3ecfa0": PORT_COLORS.video,
+  "#4fb3ff": PORT_COLORS.audio,
+  "#e86fb5": PORT_COLORS.views,
+  "#ff8a5c": PORT_COLORS.portrait,
+  "#9a9aa3": PORT_COLORS.any,
+};
+
+function themeEdges(edges: Edge[]): Edge[] {
+  return edges.map((e) => {
+    const stroke = e.style?.stroke;
+    const themed = typeof stroke === "string" ? OLD_PORT_HEX[stroke.toLowerCase()] : undefined;
+    return themed ? { ...e, style: { ...e.style, stroke: themed } } : e;
+  });
+}
+
 function numberRefs(nodes: FlowNode[], edges: Edge[]): { nodes: FlowNode[]; edges: Edge[] } {
   const counts = new Map<string, number>();
   const renamed = edges.map((e) => {
@@ -591,13 +611,14 @@ export const useFlow = create<FlowState>()((set, get) => ({
     get().patchNode(id, { status, error, unbilled: unbilled || undefined, ...(outputs ? { outputs } : {}), ...(history ? { history } : {}) });
   },
 
-  arrangeNodes: () => {
+  arrangeNodes: (full = false) => {
     const { nodes, edges } = get();
     const selected = nodes.filter((n) => n.selected);
     const target = selected.length >= 2 ? selected : nodes;
     if (target.length < 2) return;
     get().checkpoint();
-    const positions = arrange(target, edges, nodes.filter((n) => !target.includes(n)));
+    const others = nodes.filter((n) => !target.includes(n));
+    const positions = full ? arrange(target, edges, others) : tidy(target, edges, others);
     set({ nodes: nodes.map((n) => (positions.has(n.id) ? { ...n, position: positions.get(n.id)! } : n)) });
   },
 
@@ -653,7 +674,7 @@ export const useFlow = create<FlowState>()((set, get) => ({
   },
 
   openProject: ({ id, title, trashed, ...graph }) => {
-    const { nodes, edges } = numberRefs(renameModels(graph.nodes), graph.edges);
+    const { nodes, edges } = numberRefs(renameModels(graph.nodes), themeEdges(graph.edges));
     set({ projectId: id, title, trashed, nodes: propagate(nodes, edges), edges, past: [], future: [], notice: null });
   },
 

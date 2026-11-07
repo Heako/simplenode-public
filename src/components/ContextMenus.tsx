@@ -58,7 +58,7 @@ function Frame({ x, y, width, onClose, children }: { x: number; y: number; width
   return (
     <div
       ref={ref}
-      className="fixed z-50 overflow-hidden rounded-xl border border-line bg-panel shadow-2xl shadow-black/60"
+      className="fixed z-50 overflow-hidden rounded-xl border border-line bg-panel shadow-2xl shadow-shadow/60"
       style={{ ...(pos ?? { left: x, top: y }), width, visibility: pos ? "visible" : "hidden" }}
       onContextMenu={(e) => e.preventDefault()}
     >
@@ -196,7 +196,7 @@ export function NodeMenu({ x, y, nodeId, onClose }: { x: number; y: number; node
           <button
             key={label}
             disabled={disabled}
-            className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-panel-2 disabled:opacity-40 ${danger ? "text-red-300" : ""}`}
+            className={`flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-xs hover:bg-panel-2 disabled:opacity-40 ${danger ? "text-danger" : ""}`}
             onClick={() => {
               action();
               onClose();

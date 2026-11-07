@@ -497,7 +497,7 @@ export default function CompositorEditor({
 
         <main className="flex min-w-0 flex-1 flex-col">
           <div ref={area} className="relative grid min-h-0 flex-1 place-items-center overflow-hidden" onPointerDown={() => setSelected(null)}>
-            <div className="checker relative overflow-hidden shadow-2xl shadow-black/60" style={{ width: cw * scale, height: ch * scale }}>
+            <div className="checker relative overflow-hidden shadow-2xl shadow-shadow/60" style={{ width: cw * scale, height: ch * scale }}>
               {layers.map((l) => {
                 const b = box(l);
                 const i = info(l);
@@ -575,7 +575,7 @@ export default function CompositorEditor({
                   setPlaying(false);
                   setTime(Number(e.target.value));
                 }}
-                className="flex-1 accent-[var(--color-accent,#8b5cf6)]"
+                className="flex-1 accent-[var(--accent)]"
               />
               <span className="w-24 text-right text-[11px] text-muted tabular-nums">
                 {round(time).toFixed(2)} / {round(total).toFixed(2)} s
@@ -704,7 +704,7 @@ export default function CompositorEditor({
                     </label>
                   )}
                   {!place.loop && currentInfo.duration != null && (wanted(current) ?? 0) > currentInfo.duration + 0.05 && (
-                    <p className="rounded-md bg-amber-500/10 px-2 py-1.5 text-[11px] leading-snug text-amber-200">
+                    <p className="rounded-md bg-warning-tint/10 px-2 py-1.5 text-[11px] leading-snug text-warning">
                       This media only lasts {round(currentInfo.duration)} s: it stops there. Check “Loop” to repeat it until {round(wanted(current) ?? 0)} s.
                     </p>
                   )}
@@ -855,16 +855,16 @@ function TimelineRow({
           {loop && loop.once < length && (
             // The repetitions, grey, with a line at each seam.
             <div
-              className="pointer-events-none absolute inset-y-0 right-0 overflow-hidden rounded-r bg-zinc-500/60"
+              className="pointer-events-none absolute inset-y-0 right-0 overflow-hidden rounded-r bg-muted/60"
               style={{
                 left: `${(loop.once / length) * 100}%`,
-                backgroundImage: "repeating-linear-gradient(135deg, transparent 0 4px, rgba(255,255,255,0.12) 4px 8px)",
+                backgroundImage: "repeating-linear-gradient(135deg, transparent 0 4px, var(--loop-stripe) 4px 8px)",
               }}
             >
               {Array.from({ length: Math.min(Math.ceil((length - loop.once) / loop.step), 200) }, (_, j) => (
                 <div
                   key={j}
-                  className="absolute inset-y-0 w-px bg-white/50"
+                  className="absolute inset-y-0 w-px bg-on-accent/50"
                   style={{ left: `${((j * loop.step) / (length - loop.once)) * 100}%` }}
                 />
               ))}

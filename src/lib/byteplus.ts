@@ -121,7 +121,8 @@ export const BYTEPLUS_LINKS = {
   topUp: "https://console.byteplus.com/finance/overview",
   activate: "https://ai.byteplus.com/ark/region:ap-southeast-1/openManagement?LLM=%7B%7D&tab=ComputerVision",
   apiKey: "https://ai.byteplus.com/ark/region:ap-southeast-1/apiKey",
-  rights: "https://ai.byteplus.com/ark/region:ap-southeast-1/docs/seedance-2-0-purchase-guide",
+  /** Console page where the free Entry tier is activated. */
+  rights: "https://ai.byteplus.com/ark/region:ap-southeast-1/openManagement?LLM=%7B%7D&advancedActiveKey=mediaAsset",
   portraits: "https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-0-260128",
   accessKey: "https://docs.byteplus.com/en/docs/byteplus-platform/docs-creating-an-accesskey",
   iam: "https://console.byteplus.com/iam/identitymanage/user",

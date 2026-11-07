@@ -27,6 +27,9 @@ import {
   Frame,
   ScrollText,
   MonitorUp,
+  ImageUpscale,
+  Mic,
+  UserRound,
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
@@ -80,6 +83,9 @@ const KIND_ICONS: Partial<Record<LibraryItem["kind"], LucideIcon>> = {
   videoDescriber: Film,
   motionPrompt: ScrollText,
   upscale: MonitorUp,
+  upscaleImage: ImageUpscale,
+  voice: Mic,
+  avatar: UserRound,
   addAudio: AudioLines,
   compositor: Layers,
   bpPortrait: ScanFace,
@@ -175,7 +181,7 @@ function Tile({ item }: { item: LibraryItem }) {
       <button
         onPointerDown={onPointerDown}
         title={needsFal ? `${item.hint} — runs on fal.ai only (Settings → Provider)` : item.hint}
-        className={`relative flex aspect-square cursor-grab flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-panel px-1 text-center hover:border-[#4a4a52] hover:bg-panel-2 active:cursor-grabbing ${needsFal ? "opacity-45" : ""}`}
+        className={`relative flex aspect-square cursor-grab flex-col items-center justify-center gap-1.5 rounded-md border border-line bg-panel px-1 text-center hover:border-line-hover hover:bg-panel-2 active:cursor-grabbing ${needsFal ? "opacity-45" : ""}`}
       >
         <ProviderIcon modelId={item.modelId} size={17} fallback={Icon} className="text-fg" />
         <span className="line-clamp-2 text-[10px] leading-tight">{item.label}</span>

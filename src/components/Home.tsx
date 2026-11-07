@@ -77,7 +77,7 @@ function Workflows({ onPick, compact, onMore }: { onPick: (workflow: WorkflowDef
                   disabled={!ready}
                   onClick={() => onPick(w)}
                   title={w.description}
-                  className="group flex w-72 shrink-0 snap-start flex-col rounded-xl border border-line bg-panel p-4 text-left hover:border-[#4a4a52] disabled:opacity-50"
+                  className="group flex w-72 shrink-0 snap-start flex-col rounded-xl border border-line bg-panel p-4 text-left hover:border-line-hover disabled:opacity-50"
                 >
                   <div className="flex items-center gap-2.5">
                     <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-panel-2">
@@ -109,7 +109,7 @@ function Workflows({ onPick, compact, onMore }: { onPick: (workflow: WorkflowDef
                   key={w.id}
                   disabled={!ready}
                   onClick={() => onPick(w)}
-                  className="group flex flex-col rounded-xl border border-line bg-panel p-5 text-left hover:border-[#4a4a52] disabled:opacity-50"
+                  className="group flex flex-col rounded-xl border border-line bg-panel p-5 text-left hover:border-line-hover disabled:opacity-50"
                 >
                   <div className="flex items-center gap-2.5">
                     <div className="grid h-8 w-8 place-items-center rounded-lg bg-panel-2">
@@ -216,13 +216,13 @@ function FileMenu({
   return (
     <div
       ref={ref}
-      className="fixed z-50 w-52 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-2xl shadow-black/60"
+      className="fixed z-50 w-52 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-2xl shadow-shadow/60"
       style={{ left: Math.min(menu.x, window.innerWidth - 216), top: Math.min(menu.y, window.innerHeight - 180) }}
     >
       {entries.map(([action, label, Icon]) => (
         <button
           key={action}
-          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-panel-2 ${action === "trash" || action === "delete" ? "text-red-300" : ""}`}
+          className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs hover:bg-panel-2 ${action === "trash" || action === "delete" ? "text-danger" : ""}`}
           onClick={() => {
             onAction(action, menu.meta);
             onClose();
@@ -420,7 +420,7 @@ export default function Home() {
               </div>
 
               {error && (
-                <div className="mt-4 flex items-start gap-2 rounded-lg border border-red-500/40 px-3 py-2 text-xs text-red-200">
+                <div className="mt-4 flex items-start gap-2 rounded-lg border border-danger-tint/40 px-3 py-2 text-xs text-danger">
                   <span className="flex-1">{error}</span>
                   <button onClick={() => setError(null)}>✕</button>
                 </div>
@@ -439,10 +439,10 @@ export default function Home() {
                       onClick={() => tab === "files" && renaming !== meta.id && open(meta.id)}
                       onContextMenu={(e) => openMenu(e, meta)}
                     >
-                      <div className="relative overflow-hidden rounded-xl border border-line group-hover:border-[#4a4a52]">
+                      <div className="relative overflow-hidden rounded-xl border border-line group-hover:border-line-hover">
                         <Thumbnail meta={meta} className="aspect-square w-full" />
                         <button
-                          className="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-md bg-black/60 opacity-0 group-hover:opacity-100"
+                          className="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-md bg-overlay/60 opacity-0 group-hover:opacity-100"
                           onClick={(e) => openMenu(e, meta)}
                           title="Options"
                         >

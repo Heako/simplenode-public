@@ -3,13 +3,100 @@
 @import "@xyflow/react/dist/style.css";
 
 :root {
+  color-scheme: dark;
   --bg: #161618;
   --panel: #212124;
   --panel-2: #2a2a2e;
   --border: #323237;
+  --border-hover: #4a4a52;
   --text: #ededf0;
   --muted: #8d8d96;
   --accent: #8b7bff;
+  --on-accent: #ffffff;
+
+  /* Status: text, and the base of tinted backgrounds and borders. */
+  --danger: #fca5a5;
+  --danger-tint: #ef4444;
+  --success: #6ee7b7;
+  --success-tint: #10b981;
+  --warning: #fcd34d;
+  --warning-tint: #f59e0b;
+  --warning-solid: #fcd34d;
+  --on-warning-solid: #000000;
+  --info: #7dd3fc;
+  --info-tint: #0ea5e9;
+
+  /* Prompt variables. */
+  --chip: #f3c977;
+  --chip-tint: #e8b04a;
+
+  /* Over images and videos: the same in both themes. */
+  --overlay: #000000;
+  --on-overlay: #ffffff;
+  --crop-mask: rgb(0 0 0 / 0.6);
+  --shadow: #000000;
+
+  /* Canvas. */
+  --checker-a: #1b1b1e;
+  --checker-b: #232327;
+  --dots: #34343a;
+  --minimap-node: #3a3a42;
+  --minimap-mask: rgb(0 0 0 / 0.55);
+  --edge: #6b6b75;
+  --edge-selected: #ffffff;
+  --edge-glow: rgb(255 255 255 / 0.35);
+  --handle-ring: rgb(255 255 255 / 0.15);
+  --loop-stripe: rgb(255 255 255 / 0.12);
+
+  /* Ports, by value type. */
+  --port-text: #e8b04a;
+  --port-image: #8b7bff;
+  --port-video: #3ecfa0;
+  --port-audio: #4fb3ff;
+  --port-views: #e86fb5;
+  --port-portrait: #ff8a5c;
+  --port-any: #9a9aa3;
+
+  /* Brands. */
+  --love: #ff4d6d;
+  --coffee: #ffdd00;
+  --on-coffee: #000000;
+}
+
+/* Light theme: Settings → Appearance sets data-theme on <html>. */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f3f3f6;
+  --panel: #ffffff;
+  --panel-2: #ececf1;
+  --border: #dadae1;
+  --border-hover: #b4b4bf;
+  --text: #1b1b20;
+  --muted: #6a6a75;
+  --accent: #6c5cf0;
+
+  --danger: #b91c1c;
+  --success: #047857;
+  --warning: #b45309;
+  --info: #0369a1;
+
+  --chip: #9a6a12;
+
+  --checker-a: #f1f1f4;
+  --checker-b: #e4e4ea;
+  --dots: #cdcdd5;
+  --minimap-node: #d2d2da;
+  --minimap-mask: rgb(240 240 244 / 0.7);
+  --edge: #9c9ca8;
+  --edge-selected: #1b1b20;
+  --edge-glow: rgb(0 0 0 / 0.2);
+  --handle-ring: rgb(0 0 0 / 0.12);
+  --loop-stripe: rgb(0 0 0 / 0.1);
+
+  --port-text: #c98f1f;
+  --port-video: #1fa77d;
+  --port-audio: #2b8fd6;
+  --port-any: #8a8a95;
 }
 
 @theme inline {
@@ -17,9 +104,29 @@
   --color-panel: var(--panel);
   --color-panel-2: var(--panel-2);
   --color-line: var(--border);
+  --color-line-hover: var(--border-hover);
   --color-fg: var(--text);
   --color-muted: var(--muted);
   --color-accent: var(--accent);
+  --color-on-accent: var(--on-accent);
+  --color-danger: var(--danger);
+  --color-danger-tint: var(--danger-tint);
+  --color-success: var(--success);
+  --color-success-tint: var(--success-tint);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
+  --color-warning-solid: var(--warning-solid);
+  --color-on-warning-solid: var(--on-warning-solid);
+  --color-info: var(--info);
+  --color-info-tint: var(--info-tint);
+  --color-chip: var(--chip);
+  --color-chip-tint: var(--chip-tint);
+  --color-overlay: var(--overlay);
+  --color-on-overlay: var(--on-overlay);
+  --color-shadow: var(--shadow);
+  --color-love: var(--love);
+  --color-coffee: var(--coffee);
+  --color-on-coffee: var(--on-coffee);
 }
 
 html,
@@ -35,11 +142,14 @@ body {
 
 .react-flow {
   --xy-background-color: var(--bg);
-  --xy-edge-stroke: #6b6b75;
-  --xy-edge-stroke-selected: #ffffff;
+  --xy-edge-stroke: var(--edge);
+  --xy-edge-stroke-selected: var(--edge-selected);
   --xy-edge-stroke-width: 2;
   --xy-connectionline-stroke: var(--accent);
   --xy-minimap-background-color: var(--panel);
+  --xy-minimap-mask-background-color: var(--minimap-mask);
+  --xy-minimap-node-background-color: var(--minimap-node);
+  --xy-background-pattern-color: var(--dots);
 }
 
 .react-flow__node {
@@ -49,7 +159,7 @@ body {
 
 .react-flow__edge.selected .react-flow__edge-path {
   stroke-width: 3;
-  filter: drop-shadow(0 0 4px rgb(255 255 255 / 0.35));
+  filter: drop-shadow(0 0 4px var(--edge-glow));
 }
 
 .react-flow__handle {
@@ -57,14 +167,14 @@ body {
 }
 .react-flow__handle:hover,
 .react-flow__handle.connectingto {
-  box-shadow: 0 0 0 4px rgb(255 255 255 / 0.15);
+  box-shadow: 0 0 0 4px var(--handle-ring);
 }
 
 .checker {
-  background-color: #1b1b1e;
+  background-color: var(--checker-a);
   background-image:
-    linear-gradient(45deg, #232327 25%, transparent 25%), linear-gradient(-45deg, #232327 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #232327 75%), linear-gradient(-45deg, transparent 75%, #232327 75%);
+    linear-gradient(45deg, var(--checker-b) 25%, transparent 25%), linear-gradient(-45deg, var(--checker-b) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--checker-b) 75%), linear-gradient(-45deg, transparent 75%, var(--checker-b) 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }

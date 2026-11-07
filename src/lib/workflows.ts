@@ -165,6 +165,31 @@ function promptMotionGraph() {
   };
 }
 
+/**
+ * A character speaking lines in one fixed voice: a List of lines (one picked
+ * at a time), ElevenLabs v3 in a named voice, then Kling AI Avatar lip-syncs
+ * the character image to it.
+ */
+function speakGraph() {
+  const character = imageImport(0, 0, "Character (face visible)");
+  const lines = node("list", 0, 360, {
+    title: "Lines",
+    params: { items: JSON.stringify(["Every morning is a gentle new beginning.", "I breathe in calm. I breathe out tension."]), selected: "0" },
+  });
+  const voice = node("voice", 420, 360);
+  const avatar = node("avatar", 840, 0);
+  const preview = node("preview", 1260, 0);
+  return {
+    nodes: [character, lines, voice, avatar, preview],
+    edges: [
+      link(lines, "text", voice, "text", "text"),
+      link(character, "image", avatar, "image", "image"),
+      link(voice, "audio", avatar, "audio", "audio"),
+      link(avatar, "video", preview, "value", "video"),
+    ],
+  };
+}
+
 const SCENE_PROMPT =
   "Edit Image 1. " +
   "Replace the person in Image 1 with the person shown in Image 2, Image 3 and Image 4. " +
@@ -241,6 +266,20 @@ export const WORKFLOWS: Workflow[] = [
       "Once you like it, run Upscale / Export in 1080p, 2K or 4K and download it",
     ],
     build: promptMotionGraph,
+  },
+  {
+    id: "speak",
+    category: "video",
+    title: "Make your character speak",
+    description:
+      "Your character says your lines, always in the same voice: ElevenLabs v3 speaks each line in the voice you pick, and Kling AI Avatar animates your character's image with the lips in sync.",
+    steps: [
+      "Import an image of your character with the face clearly visible",
+      "Write the lines in the List node; the selected one is spoken",
+      "Pick a voice on the Voice node and keep it for every line, then run it",
+      "Run Talking avatar; select the next line and run Voice and Talking avatar again",
+    ],
+    build: speakGraph,
   },
   {
     id: "recast-replace",

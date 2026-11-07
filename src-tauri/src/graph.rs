@@ -98,7 +98,7 @@ struct NodeEvent<'a> {
 fn is_remote(kind: &str) -> bool {
     matches!(
         kind,
-        "model" | "enhancer" | "describer" | "videoDescriber" | "motionPrompt" | "angles" | "recast" | "addAudio" | "upscale" | "bpPortrait" | "bpSeedance" | "bpSeedream"
+        "model" | "enhancer" | "describer" | "videoDescriber" | "motionPrompt" | "angles" | "recast" | "addAudio" | "upscale" | "upscaleImage" | "voice" | "avatar" | "bpPortrait" | "bpSeedance" | "bpSeedream"
     )
 }
 
@@ -860,6 +860,52 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                 }
             }
         }
+        "voice" => {
+            let text = text_or_param(node, inputs, "text", "text")?;
+            let voice = match param(node, "voice").trim() {
+                "" => "Matilda",
+                v => v,
+            };
+            // Higher is steadier from one clip to the next; lower is more expressive.
+            let stability = param(node, "stability").parse::<f64>().unwrap_or(0.5).clamp(0.0, 1.0);
+            let url = if on_wavespeed {
+                let ws = wavespeed::WaveSpeed::from_account(http)?;
+                let input = serde_json::json!({ "text": text, "voice_id": voice, "stability": stability });
+                let serde_json::Value::Object(input) = input else { unreachable!() };
+                ws.run(wavespeed::VOICE, input).await?
+            } else {
+                fal.speak(&text, voice, stability).await?
+            };
+            out.insert("audio".into(), storage::download(app, http, &url).await?.to_string_lossy().into_owned());
+        }
+        "avatar" => {
+            let image = require(inputs, "image", "an image of the character")?;
+            let audio = require(inputs, "audio", "a voice (audio)")?;
+            let prompt = match inputs.get("prompt").filter(|v| !v.is_empty()) {
+                Some(texts) => texts.join("\n"),
+                None => param(node, "prompt").to_owned(),
+            };
+            let url = if on_wavespeed {
+                let ws = wavespeed::WaveSpeed::from_account(http)?;
+                let host = |v: &str| {
+                    let v = v.to_owned();
+                    let ws = &ws;
+                    async move { if v.starts_with("http") { Ok(v) } else { ws.upload(&storage::owned_path(app, &v)?).await } }
+                };
+                let (image, audio) = futures::try_join!(host(image), host(audio))?;
+                let mut input = serde_json::json!({ "image": image, "audio": audio });
+                if !prompt.trim().is_empty() {
+                    input["prompt"] = serde_json::json!(prompt.trim());
+                }
+                let serde_json::Value::Object(input) = input else { unreachable!() };
+                ws.run(wavespeed::AVATAR, input).await?
+            } else {
+                let image = storage::to_model_input(app, image)?;
+                let audio = if audio.starts_with("http") { audio.to_owned() } else { fal.upload(&storage::owned_path(app, audio)?).await? };
+                fal.talking_avatar(&image, &audio, &prompt).await?
+            };
+            out.insert("video".into(), storage::download(app, http, &url).await?.to_string_lossy().into_owned());
+        }
         "upscale" => {
             let video = require(inputs, "video", "a video")?;
             let resolution = upscale_resolution(param(node, "resolution"));
@@ -906,6 +952,31 @@ async fn execute(app: &AppHandle, fal: &Fal, http: &reqwest::Client, node: &Grap
                 path
             };
             out.insert("video".into(), path.to_string_lossy().into_owned());
+        }
+        "upscaleImage" => {
+            let image = require(inputs, "image", "an image")?;
+            let resolution = match param(node, "resolution") {
+                "2k" => "2k",
+                "8k" => "8k",
+                _ => "4k",
+            };
+            let format = match param(node, "format") {
+                f @ ("jpg" | "webp") => f,
+                _ => "png",
+            };
+            let url = if on_wavespeed {
+                let ws = wavespeed::WaveSpeed::from_account(http)?;
+                let image = if image.starts_with("http") { image.to_owned() } else { ws.upload(&storage::owned_path(app, image)?).await? };
+                let format = if format == "jpg" { "jpeg" } else { format };
+                let input = serde_json::json!({ "image": image, "target_resolution": resolution, "output_format": format });
+                let serde_json::Value::Object(input) = input else { unreachable!() };
+                ws.run(wavespeed::IMAGE_UPSCALER, input).await?
+            } else {
+                // SeedVR2 goes up to 2160p: 8K is WaveSpeed's only.
+                let target = if resolution == "2k" { "1440p" } else { "2160p" };
+                fal.upscale_image(&storage::to_model_input(app, image)?, target, format).await?
+            };
+            out.insert("image".into(), storage::download(app, http, &url).await?.to_string_lossy().into_owned());
         }
         "addAudio" => {
             let video = require(inputs, "video", "a video")?;

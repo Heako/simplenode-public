@@ -3,6 +3,7 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { ask, open, save } from "@tauri-apps/plugin-dialog";
 import { dollars, useVideoDuration } from "@/lib/cost";
+import { IMAGE_UPSCALE_FORMATS, IMAGE_UPSCALE_RESOLUTIONS, imageUpscaleCost, UPSCALE_FIDELITY, UPSCALE_FORMATS, UPSCALE_FPS, UPSCALE_LOOKS, UPSCALE_QUALITY, UPSCALE_RESOLUTIONS, VOICES, VOICE_STABILITY } from "@/lib/tools";
 import { DRAFT_DAYS, dayMonth, draftExpired, draftExpiry, draftProvider, finalizeDraft, finalizeEstimate } from "@/lib/draft";
 import {
   SEEDANCE_DURATIONS,
@@ -60,6 +61,9 @@ import {
   Frame,
   ScrollText,
   MonitorUp,
+  ImageUpscale,
+  Mic,
+  UserRound,
 } from "lucide-react";
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
@@ -130,7 +134,7 @@ function RunStop({ id, running, title }: { id: string; running: boolean; title: 
   const stop = useFlow((s) => s.stop);
   return running ? (
     <button
-      className="nodrag flex items-center gap-1.5 rounded-lg border border-red-500/50 px-3 py-1.5 text-[12px] text-red-300 hover:bg-red-500/10"
+      className="nodrag flex items-center gap-1.5 rounded-lg border border-danger-tint/50 px-3 py-1.5 text-[12px] text-danger hover:bg-danger-tint/10"
       onClick={() => stop([id])}
       title="Stops this node and cancels its request"
     >
@@ -195,14 +199,14 @@ function NodeShell({
     updateNodeInternals(id);
   }, [id, portsKey, handleStep, updateNodeInternals]);
   const ring =
-    data.status === "error" ? "border-red-500/70" : selected ? "border-accent" : "border-line hover:border-[#45454d]";
+    data.status === "error" ? "border-danger-tint/70" : selected ? "border-accent" : "border-line hover:border-line-hover";
   // Tall enough for every port, so none hangs below the card.
   const minHeight = HANDLE_TOP + Math.max(inputs.length, outputs.length, 1) * handleStep + 8;
 
   return (
     <div
       data-resized={resized || undefined}
-      className={`group group/card relative flex flex-col rounded-2xl border bg-panel shadow-2xl shadow-black/50 transition-colors ${ring}`}
+      className={`group group/card relative flex flex-col rounded-2xl border bg-panel shadow-2xl shadow-shadow/50 transition-colors ${ring}`}
       style={
         !resized
           ? { width: cardWidth, minHeight }
@@ -248,7 +252,7 @@ function NodeShell({
         {runnable &&
           (running ? (
             <button
-              className="nodrag grid h-6 w-6 place-items-center rounded-md text-red-300 hover:bg-red-500/10"
+              className="nodrag grid h-6 w-6 place-items-center rounded-md text-danger hover:bg-danger-tint/10"
               onClick={() => stop([id])}
               title="Stop this node (cancels its request)"
             >
@@ -265,7 +269,7 @@ function NodeShell({
           ))}
       </div>
       <div className="flex min-h-0 flex-1 flex-col gap-2 px-3.5 pb-3.5">{children}</div>
-      {data.error && <div className="mx-3.5 mb-3 rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">{data.error}</div>}
+      {data.error && <div className="mx-3.5 mb-3 rounded-lg bg-danger-tint/10 px-2.5 py-1.5 text-[11px] text-danger">{data.error}</div>}
     </div>
   );
 }
@@ -392,7 +396,7 @@ function DownloadAllButton({ paths, name, className }: { paths: string[]; name?:
   );
 }
 
-const toolButton = "nodrag grid h-7 w-7 place-items-center rounded-md text-white/90 hover:bg-white/15 hover:text-white";
+const toolButton = "nodrag grid h-7 w-7 place-items-center rounded-md text-on-overlay/90 hover:bg-on-overlay/15 hover:text-on-overlay";
 
 /** Full-window viewer; Escape or a click outside closes it. */
 function Lightbox({ value, name, onClose }: { value: string; name?: string; onClose: () => void }) {
@@ -410,7 +414,7 @@ function Lightbox({ value, name, onClose }: { value: string; name?: string; onCl
   return createPortal(
     // Sized against the viewport: a percentage max-height doesn't resolve in
     // the centering container, and the top band stays free for the buttons.
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 px-8 pt-16 pb-8" onClick={onClose}>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-overlay/90 px-8 pt-16 pb-8" onClick={onClose}>
       <div className="absolute top-4 right-4 flex gap-1" onClick={(e) => e.stopPropagation()}>
         <DownloadButton path={value} name={name} className={toolButton} />
         <button className={toolButton} onClick={onClose} title="Close (Esc)">
@@ -492,13 +496,13 @@ function Media({
         <div className="flex flex-col items-center gap-2 text-[11px] text-muted">{empty}</div>
       )}
       {value && (
-        <div className="absolute inset-x-0 top-0 flex items-center gap-0.5 bg-gradient-to-b from-black/55 to-transparent px-1.5 pt-1.5 pb-4">
+        <div className="absolute inset-x-0 top-0 flex items-center gap-0.5 bg-gradient-to-b from-overlay/55 to-transparent px-1.5 pt-1.5 pb-4">
           {browsable && (
             <>
               <button className={`${toolButton} disabled:opacity-30`} disabled={index === 0} onClick={() => onPick(index - 1)} title="Previous generation">
                 <ChevronLeft size={15} />
               </button>
-              <span className="min-w-9 text-center text-[11px] text-white/90 tabular-nums">
+              <span className="min-w-9 text-center text-[11px] text-on-overlay/90 tabular-nums">
                 {index + 1} / {history.length}
               </span>
               <button
@@ -518,7 +522,7 @@ function Media({
                 onClick={() => setCover(nodeId, isCover ? null : value)}
                 title={isCover ? "Project cover: click to go back to the last generated image" : "Set as the project cover (home page)"}
               >
-                <Star size={14} className={isCover ? "fill-amber-300 text-amber-300" : undefined} />
+                <Star size={14} className={isCover ? "fill-warning text-warning" : undefined} />
               </button>
             )}
             <DownloadButton path={value} name={name} className={toolButton} />
@@ -530,7 +534,7 @@ function Media({
         </div>
       )}
       {value && size && (
-        <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-black/55 px-1.5 py-0.5 text-[10px] text-white/90 tabular-nums">
+        <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded bg-overlay/55 px-1.5 py-0.5 text-[10px] text-on-overlay/90 tabular-nums">
           {size}
         </span>
       )}
@@ -616,7 +620,7 @@ export function PromptNode(props: NodeProps<FlowNode>) {
         <div className="flex flex-wrap items-center gap-1 text-[10px] text-muted">
           Unused:
           {unused.map((name) => (
-            <span key={name} className="nodrag flex items-center rounded-md border border-dashed border-[#e8b04a]/40 text-[10px] text-[#f3c977]">
+            <span key={name} className="nodrag flex items-center rounded-md border border-dashed border-chip-tint/40 text-[10px] text-chip">
               <button className="py-0.5 pl-1.5" onClick={() => editor.current?.insertVar(name)} title="Insert again at the cursor">
                 {varLabel(name)}
               </button>
@@ -761,6 +765,13 @@ export function ImageNode(props: NodeProps<FlowNode>) {
   );
 }
 
+/** How reference-to-video models name their images in the prompt (each model's own convention). */
+const REFERENCE_PROMPTS: Record<string, string> = {
+  "seedance-2.5-reference": 'Prompt: name the images @Image1, @Image2… (e.g. "@Image1 walks into the room of @Image2")',
+  "minimax-h3-reference": 'Prompt: name the images Image 1, Image 2… (e.g. "The woman in Image 1 walks into the room of Image 2")',
+  "minimax-h3-max-reference": 'Prompt: name the images Image 1, Image 2… (e.g. "The woman in Image 1 walks into the room of Image 2")',
+};
+
 export function ModelNode(props: NodeProps<FlowNode>) {
   const { id, data } = props;
   const model = findModel(data.params.modelId);
@@ -804,7 +815,12 @@ export function ModelNode(props: NodeProps<FlowNode>) {
         </>
       )}
       {!promptWired && (
-        <textarea className={`${GROW} ${field} nowheel h-16 resize-none`} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Prompt (or connect a Prompt node)" />
+        <textarea
+          className={`${GROW} ${field} nowheel h-16 resize-none`}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder={REFERENCE_PROMPTS[model?.id ?? ""] ?? "Prompt (or connect a Prompt node)"}
+        />
       )}
       {model?.negative && !negativeWired && (
         <textarea
@@ -851,7 +867,7 @@ function DraftBar({ id, data, running }: { id: string; data: FlowNode["data"]; r
 
   return (
     <div className="flex items-center gap-2">
-      <span className={`rounded px-1.5 py-0.5 text-[10px] ${expired ? "bg-red-500/15 text-red-300" : "bg-amber-500/15 text-amber-300"}`}>
+      <span className={`rounded px-1.5 py-0.5 text-[10px] ${expired ? "bg-danger-tint/15 text-danger" : "bg-warning-tint/15 text-warning"}`}>
         {expired ? "Draft expired" : "480p draft"}
         {expiry && ` · ${expired ? "on" : "expires"} ${dayMonth(expiry)}`}
       </span>
@@ -978,7 +994,7 @@ export function CropNode(props: NodeProps<FlowNode>) {
         onClick={() => setCover(id, data.cover === result ? null : result)}
         title={data.cover === result ? "Project cover: click to go back to the last generated image" : "Set as the project cover (home page)"}
       >
-        <Star size={14} className={data.cover === result ? "fill-amber-300 text-amber-300" : undefined} />
+        <Star size={14} className={data.cover === result ? "fill-warning text-warning" : undefined} />
       </button>
       <DownloadButton path={result} name="crop" className={toolButton} />
       <button className={toolButton} onClick={() => setFull(true)} title="Full screen">
@@ -1044,7 +1060,7 @@ export function FrameNode(props: NodeProps<FlowNode>) {
   return (
     <NodeShell {...props} icon={Frame} title="Extract frame" runnable={false}>
       {input ? (
-        <video ref={video} src={mediaSrc(input)} className="nodrag w-full rounded-md bg-black" controls muted playsInline preload="metadata" />
+        <video ref={video} src={mediaSrc(input)} className="nodrag w-full rounded-md bg-overlay" controls muted playsInline preload="metadata" />
       ) : (
         <div className="checker grid min-h-[120px] place-items-center rounded-xl border border-line text-[11px] text-muted">
           Connect a video (already run)
@@ -1266,7 +1282,7 @@ export function RecastNode(props: NodeProps<FlowNode>) {
               {p.video ? (
                 <video src={mediaSrc(p.video)} className="nodrag h-full w-full object-cover" controls muted loop playsInline />
               ) : p.error ? (
-                <span className="px-1 text-center text-[10px] leading-tight text-red-300" title={p.error}>
+                <span className="px-1 text-center text-[10px] leading-tight text-danger" title={p.error}>
                   {/flagged by a content checker/i.test(p.error) ? "Refused by the model's content filter" : p.error}
                 </span>
               ) : running ? (
@@ -1467,11 +1483,11 @@ export function GridCropNode(props: NodeProps<FlowNode>) {
 
   return (
     <NodeShell {...props} icon={Grid3x3} title="Grid Crop">
-      <div className="rounded-lg border border-amber-400/25 bg-amber-400/5 px-2.5 py-2 text-[11px] leading-snug text-amber-100/90">
+      <div className="rounded-lg border border-warning-tint/25 bg-warning-tint/5 px-2.5 py-2 text-[11px] leading-snug text-warning">
         Cuts an image <b>already laid out as a grid</b> (a sheet of several views). To generate different camera angles from
         a single image:
         <button
-          className="nodrag mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md bg-amber-300/90 py-1 text-[11px] font-medium text-black hover:bg-amber-200"
+          className="nodrag mt-1.5 flex w-full items-center justify-center gap-1.5 rounded-md bg-warning-solid/90 py-1 text-[11px] font-medium text-on-warning-solid hover:bg-warning-solid"
           onClick={() => gridCropToAngles(id)}
         >
           <Camera size={12} /> Replace with Camera angles
@@ -1491,9 +1507,9 @@ export function GridCropNode(props: NodeProps<FlowNode>) {
               style={{ gridTemplateColumns: `repeat(${cols}, 1fr)`, gridTemplateRows: `repeat(${rows}, 1fr)` }}
             >
               {cells.map((_, i) => (
-                <div key={i} className="relative border border-white/70">
-                  {inset > 0 && <div className="absolute border border-dashed border-amber-300/80" style={{ inset: `${inset}%` }} />}
-                  <span className="absolute top-0.5 left-0.5 rounded bg-black/60 px-1 text-[9px]">{i + 1}</span>
+                <div key={i} className="relative border border-on-overlay/70">
+                  {inset > 0 && <div className="absolute border border-dashed border-warning-solid/80" style={{ inset: `${inset}%` }} />}
+                  <span className="absolute top-0.5 left-0.5 rounded bg-overlay/60 px-1 text-[9px]">{i + 1}</span>
                 </div>
               ))}
             </div>
@@ -1697,19 +1713,19 @@ function Gallery({
             title={v.label}
             // A ring, not a border: a transparent border shows the button's own (black) background.
             className={`nodrag relative isolate block w-full overflow-hidden rounded bg-transparent p-0 transition-shadow ${
-              i === selected ? "ring-2 ring-accent ring-offset-2 ring-offset-panel" : onSelect ? "hover:ring-1 hover:ring-white/40" : ""
+              i === selected ? "ring-2 ring-accent ring-offset-2 ring-offset-panel" : onSelect ? "hover:ring-1 hover:ring-on-overlay/40" : ""
             } ${onSelect ? "cursor-pointer" : "cursor-default"}`}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={mediaSrc(v.path)} alt="" className={`block w-full object-cover ${square ? "aspect-square" : "aspect-video"}`} draggable={false} />
-            <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/75 to-transparent px-1.5 pt-3 pb-1 text-left text-[9px] text-white">
+            <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-overlay/75 to-transparent px-1.5 pt-3 pb-1 text-left text-[9px] text-on-overlay">
               {i + 1}. {v.label}
             </span>
           </button>
           <DownloadButton
             path={v.path}
             name={`${String(i + 1).padStart(2, "0")}-${v.label}`}
-            className="nodrag absolute top-1 right-1 grid h-6 w-6 place-items-center rounded-md bg-black/65 text-white opacity-0 transition-opacity group-hover/media:opacity-100 hover:bg-black/85"
+            className="nodrag absolute top-1 right-1 grid h-6 w-6 place-items-center rounded-md bg-overlay/65 text-on-overlay opacity-0 transition-opacity group-hover/media:opacity-100 hover:bg-overlay/85"
           />
         </div>
       ))}
@@ -1783,7 +1799,7 @@ export function AngleExportNode(props: NodeProps<FlowNode>) {
         <span className={`truncate ${folder ? "text-fg" : "text-muted"}`}>{folder || "Choose the export folder"}</span>
       </button>
       {data.outputs.summary && (
-        <div className="flex items-center gap-2 text-[11px] text-emerald-300">
+        <div className="flex items-center gap-2 text-[11px] text-success">
           {data.outputs.summary}
           <button className="nodrag ml-auto text-accent hover:underline" onClick={() => revealItemInDir(folder)}>
             Open
@@ -1829,43 +1845,143 @@ export function AddAudioNode(props: NodeProps<FlowNode>) {
   );
 }
 
-const UPSCALE_RESOLUTIONS: [string, string][] = [
-  ["1080p", "1080p (Full HD)"],
-  ["2k", "2K"],
-  ["4k", "4K"],
-];
-const UPSCALE_QUALITY: [string, string][] = [
-  ["standard", "Standard"],
-  ["pro", "Pro: finer detail, steadier frames (4–8× the price)"],
-];
-const UPSCALE_LOOKS: [string, string][] = [
-  ["aigc", "AI-generated video"],
-  ["general", "General"],
-  ["ugc", "Phone / social video"],
-  ["short_series", "Short drama"],
-  ["old_film", "Old film restoration"],
-];
-const UPSCALE_FIDELITY: [string, string][] = [
-  ["high", "Faithful: close to the source"],
-  ["medium", "Enhanced: sharper, more retouched"],
-];
-const UPSCALE_FPS: [string, string][] = [
-  ["", "Same as the source"],
-  ["24", "24 fps (cinema)"],
-  ["25", "25 fps"],
-  ["30", "30 fps"],
-  ["60", "60 fps (smooth, interpolated)"],
-];
-const UPSCALE_FORMATS: [string, string][] = [
-  ["h264", "MP4 · H.264 (plays everywhere)"],
-  ["h265", "MP4 · H.265 (half the size)"],
-  ["prores", "MOV · ProRes 422 HQ (for editing)"],
-];
+/** A cost on WaveSpeed for an amount (characters or seconds), none on fal. */
+function useSpeechCost(kind: "voice" | "avatar", amount: number | null) {
+  const [cost, setCost] = useState<number | null>(null);
+  const onFal = useKeys((s) => s.status?.provider !== "wavespeed");
+  useEffect(() => {
+    if (amount == null || amount <= 0) return setCost(null);
+    let live = true;
+    invoke<number | null>("speech_cost", { kind, amount })
+      .then((c) => live && setCost(c))
+      .catch(() => live && setCost(null));
+    return () => {
+      live = false;
+    };
+  }, [kind, amount, onFal]);
+  return cost;
+}
+
+/**
+ * Text to speech in a fixed ElevenLabs voice: every line a character says
+ * goes through the same voice, so they always sound alike.
+ */
+export function VoiceNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const [text, setText] = useParam(id, data, "text");
+  const [voice, setVoice] = useParam(id, data, "voice");
+  const [stability, setStability] = useParam(id, data, "stability");
+  const wired = useConnected(id, "text");
+  const input = useInputValue(id, "text");
+  const pickHistory = useFlow((s) => s.pickHistory);
+  const running = useRunning(id);
+  const length = (wired ? (input ?? "") : text).length;
+  const cost = useSpeechCost("voice", length || null);
+  return (
+    <NodeShell {...props} icon={Mic} title="Voice">
+      <Media
+        value={data.outputs.audio}
+        running={data.status === "running"}
+        empty={<span>Write or connect a text, then run</span>}
+        name={`voice-${voice || "Matilda"}`}
+        history={data.history}
+        onPick={(i) => pickHistory(id, i)}
+      />
+      {!wired && (
+        <textarea
+          className={`${GROW} ${field} nowheel h-20 resize-none`}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="What the character says. Tags like [whispers] or [laughs] set the tone."
+        />
+      )}
+      <Select label="Voice" value={voice || "Matilda"} options={VOICES} onChange={setVoice} />
+      <Select label="Delivery" value={stability || "0.5"} options={VOICE_STABILITY} onChange={setStability} />
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted">
+          {length === 0 ? "Keep the same voice for every line" : cost != null ? `Cost ≈ ${dollars(cost)} (${length} characters)` : `${length} characters`}
+        </span>
+        <RunStop id={id} running={running} title="Speaks the text" />
+      </div>
+    </NodeShell>
+  );
+}
+
+/** Kling AI Avatar: the character image speaks the connected voice, lips in sync. */
+export function AvatarNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const [prompt, setPrompt] = useParam(id, data, "prompt");
+  const promptWired = useConnected(id, "prompt");
+  const pickHistory = useFlow((s) => s.pickHistory);
+  const running = useRunning(id);
+  const seconds = useVideoDuration(useInputValue(id, "audio"));
+  const cost = useSpeechCost("avatar", seconds);
+  return (
+    <NodeShell {...props} icon={UserRound} title="Talking avatar" subtitle="Kling AI Avatar v2 Pro">
+      <Media
+        value={data.outputs.video}
+        running={data.status === "running"}
+        empty={<span>Connect a character image and a voice, then run</span>}
+        name="talking"
+        history={data.history}
+        onPick={(i) => pickHistory(id, i)}
+      />
+      {!promptWired && (
+        <textarea
+          className={`${GROW} ${field} nowheel h-14 resize-none`}
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          placeholder="Acting (optional): e.g. calm, soft smile, gentle nods, looks into the lens"
+        />
+      )}
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted">
+          {seconds == null ? "The video lasts as long as the voice" : cost != null ? `Cost ≈ ${dollars(cost)} (${Math.round(seconds)} s)` : `${Math.round(seconds)} s of voice`}
+        </span>
+        <RunStop id={id} running={running} title="Makes the character speak" />
+      </div>
+    </NodeShell>
+  );
+}
 
 /**
  * A finished video upscaled for export, then written locally in the chosen
  * frame rate, format and sound; downloadable from the node.
  */
+/** An image made sharper and larger: fal's SeedVR2 or WaveSpeed's Image Upscaler. */
+export function UpscaleImageNode(props: NodeProps<FlowNode>) {
+  const { id, data } = props;
+  const [resolution, setResolution] = useParam(id, data, "resolution");
+  const [format, setFormat] = useParam(id, data, "format");
+  const onWs = useKeys((s) => s.status?.provider === "wavespeed");
+  const pickHistory = useFlow((s) => s.pickHistory);
+  const running = useRunning(id);
+  const res = resolution || "4k";
+  // SeedVR2 on fal stops at 2160p: 8K is run as 4K there.
+  const options = onWs ? IMAGE_UPSCALE_RESOLUTIONS : IMAGE_UPSCALE_RESOLUTIONS.filter(([v]) => v !== "8k");
+  const cost = imageUpscaleCost(onWs, res);
+  return (
+    <NodeShell {...props} icon={ImageUpscale} title="Upscale image">
+      <Media
+        value={data.outputs.image}
+        running={data.status === "running"}
+        empty={<span>Connect an image, then run</span>}
+        name={`image-${res}`}
+        history={data.history}
+        onPick={(i) => pickHistory(id, i)}
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <Select label="Resolution" value={!onWs && res === "8k" ? "4k" : res} options={options} onChange={setResolution} />
+        <Select label="Format" value={format || "png"} options={IMAGE_UPSCALE_FORMATS} onChange={setFormat} />
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[11px] text-muted">{onWs ? `Cost ${dollars(cost)}` : cost < 0.01 ? "Cost under $0.01" : `Cost ≤ ${dollars(cost)}`}</span>
+        <RunStop id={id} running={running} title="Upscales the image" />
+      </div>
+    </NodeShell>
+  );
+}
+
 export function UpscaleNode(props: NodeProps<FlowNode>) {
   const { id, data } = props;
   const [resolution, setResolution] = useParam(id, data, "resolution");
@@ -2017,7 +2133,7 @@ function useBytePlusGate(kind: FlowNode["data"]["kind"]) {
 /** Replaces the run button while a BytePlus key is missing. */
 function KeyNotice({ text }: { text: string }) {
   return (
-    <div className="flex items-start gap-1.5 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-200">
+    <div className="flex items-start gap-1.5 rounded-lg bg-warning-tint/10 px-2.5 py-1.5 text-[11px] leading-snug text-warning">
       <KeyRound size={12} className="mt-0.5 shrink-0" />
       <span>{text} (BytePlus ModelArk).</span>
     </div>
@@ -2034,9 +2150,9 @@ function Toggle({ label, value, onChange, title }: { label: string; value: boole
 }
 
 const PORTRAIT_STATUS: Record<string, [string, string]> = {
-  Processing: ["In review", "bg-amber-500/15 text-amber-300"],
-  Active: ["Validated", "bg-emerald-500/15 text-emerald-300"],
-  Failed: ["Refused", "bg-red-500/15 text-red-300"],
+  Processing: ["In review", "bg-warning-tint/15 text-warning"],
+  Active: ["Validated", "bg-success-tint/15 text-success"],
+  Failed: ["Refused", "bg-danger-tint/15 text-danger"],
 };
 
 /** Sends an AI character to the user's BytePlus portrait library and follows its review. */
@@ -2085,7 +2201,7 @@ export function BpPortraitNode(props: NodeProps<FlowNode>) {
         </div>
       )}
       <div className="flex items-start gap-1.5 text-[10px] leading-snug text-muted">
-        <TriangleAlert size={11} className="mt-px shrink-0 text-amber-300" />
+        <TriangleAlert size={11} className="mt-px shrink-0 text-warning" />
         <span>AI character only — must not resemble any real person — no brand logo on the image.</span>
       </div>
       {gate ? (
@@ -2155,13 +2271,13 @@ export function BpSeedanceNode(props: NodeProps<FlowNode>) {
         <textarea className={`${GROW} ${field} nowheel h-16 resize-none`} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder='Prompt (e.g. "The woman in Image 1 walks…")' />
       )}
       {mode === "conflict" ? (
-        <div className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-red-300">
+        <div className="rounded-lg bg-danger-tint/10 px-2.5 py-1.5 text-[11px] leading-snug text-danger">
           Seedance 2.5 can&apos;t mix a start/end image with references. Disconnect one of them: to keep the character, keep the portrait and describe the first shot in the prompt.
         </div>
       ) : mode === "noStart" ? (
-        <div className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">An end image also needs a start image.</div>
+        <div className="rounded-lg bg-danger-tint/10 px-2.5 py-1.5 text-[11px] text-danger">An end image also needs a start image.</div>
       ) : refs > SEEDANCE_MAX_REFS ? (
-        <div className="rounded-lg bg-red-500/10 px-2.5 py-1.5 text-[11px] text-red-300">{SEEDANCE_MAX_REFS} references at most (portraits and images).</div>
+        <div className="rounded-lg bg-danger-tint/10 px-2.5 py-1.5 text-[11px] text-danger">{SEEDANCE_MAX_REFS} references at most (portraits and images).</div>
       ) : (
         <div className="text-[10px] leading-snug text-muted">{SEEDANCE_MODES[mode]}</div>
       )}
@@ -2228,7 +2344,7 @@ export function BpSeedreamNode(props: NodeProps<FlowNode>) {
       <Media value={data.outputs.image} running={data.status === "running"} empty={<ImageIcon size={20} />} name="seedream-byteplus" history={data.history} onPick={(i) => pickHistory(id, i)} />
       {data.outputs.image &&
         (expiry ? (
-          <span className={`self-start rounded px-1.5 py-0.5 text-[10px] ${trusted ? "bg-emerald-500/15 text-emerald-300" : "bg-panel-2 text-muted"}`}>
+          <span className={`self-start rounded px-1.5 py-0.5 text-[10px] ${trusted ? "bg-success-tint/15 text-success" : "bg-panel-2 text-muted"}`}>
             {trusted ? `Trusted for Seedance · expires ${dayMonth(expiry)}` : `Trust expired on ${dayMonth(expiry)}`}
           </span>
         ) : (
@@ -2295,6 +2411,9 @@ export const nodeTypes = {
   videoDescriber: VideoDescriberNode,
   motionPrompt: MotionPromptNode,
   upscale: UpscaleNode,
+  upscaleImage: UpscaleImageNode,
+  voice: VoiceNode,
+  avatar: AvatarNode,
   recast: RecastNode,
   addAudio: AddAudioNode,
 };

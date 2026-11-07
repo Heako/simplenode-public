@@ -36,7 +36,7 @@ All these steps happen in the BytePlus console. SimpleNode doesn't automate them
 
 ### 1. Account and Seedance 2.5 activation
 
-1. Create an account at <https://console.byteplus.com/auth/signup> and get it verified (individual or company, as BytePlus requires).
+1. Create an account at <https://console.byteplus.com/auth/signup> and get it verified. For AI Portraits, the verification must be a **company** one (see step 4).
 2. Activating Seedance 2.5 requires **one** of these: a balance of at least $30 ([top up](https://console.byteplus.com/finance/overview)), an AI Savings Plan of at least $30, or a Seedance resource pack.
 3. Activate the models in ModelArk: **Model activation** (Seedance 2.5, Seedream 5.0).
 
@@ -71,8 +71,9 @@ The portrait library doesn't accept the API key: it requires an **Access Key / S
 
 ### 4. Advanced Creation Rights (portraits only)
 
-1. Activate the **Advanced Creation Rights**: [purchase guide](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/seedance-2-0-purchase-guide).
-2. When the **first portrait group is created**, BytePlus asks you to sign an **authorization letter** in the console. If an AI Portrait fails with an authorization message, open [My portraits](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-0-260128) (My assets → Virtual Portrait), sign, then run the node again.
+1. Get your account **verified as a company** (Real-name verification → enterprise, with your company registration certificate; BytePlus reviews it in 1 to 2 working days). Without it, the free tier below stays greyed out.
+2. Activate the **free "Entry" tier** of the **Advanced Creation Rights**: console → **Model activation → Advanced Creation Rights** ([direct link](https://ai.byteplus.com/ark/region:ap-southeast-1/openManagement?LLM=%7B%7D&advancedActiveKey=mediaAsset)), card "Free Version". It allows 50 portraits. The default "Basic" tier allows **no** AI portrait at all; the paid tiers ($1,400 and $4,200 a month) are only for large volumes. Details: [purchase guide](https://ai.byteplus.com/ark/region:ap-southeast-1/docs/seedance-2-0-purchase-guide).
+3. When the **first portrait group is created**, BytePlus asks you to sign an **authorization letter** in the console. If an AI Portrait fails with an authorization message, open [My portraits](https://ai.byteplus.com/ark/region:ap-southeast-1/experience/gen_video?model=dreamina-seedance-2-0-260128) (My assets → Virtual Portrait), sign, then run the node again.
 
 ### 5. In SimpleNode
 

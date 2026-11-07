@@ -52,7 +52,7 @@ function chipText(name: string, value: string | null | undefined, display: VarDi
 }
 
 const CHIP_STYLE =
-  "margin:0 1px;padding:1px 4px;border-radius:4px;background:rgba(232,176,74,0.2);color:#f3c977;white-space:nowrap;cursor:default";
+  "margin:0 1px;padding:1px 4px;border-radius:4px;background:color-mix(in srgb, var(--chip-tint) 20%, transparent);color:var(--chip);white-space:nowrap;cursor:default";
 
 // ---------------------------------------------------------------------------
 // Template <-> document
@@ -298,7 +298,7 @@ const TemplateEditor = forwardRef<TemplateEditorHandle, Props>(function Template
         rect &&
         createPortal(
           <div
-            className="fixed z-50 w-60 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-2xl shadow-black/60"
+            className="fixed z-50 w-60 overflow-hidden rounded-xl border border-line bg-panel py-1 shadow-2xl shadow-shadow/60"
             style={{
               left: Math.min(rect.left, window.innerWidth - 248),
               // Rows are ~28px plus the heading; flip above the "@" near the bottom.
@@ -324,7 +324,7 @@ const TemplateEditor = forwardRef<TemplateEditorHandle, Props>(function Template
                   </>
                 ) : (
                   <>
-                    <span className="shrink-0 rounded bg-[#e8b04a]/20 px-1 text-[#f3c977]">{varLabel(item.name)}</span>
+                    <span className="shrink-0 rounded bg-chip-tint/20 px-1 text-chip">{varLabel(item.name)}</span>
                     <span className="min-w-0 flex-1 truncate text-[10px] text-muted">{valueText(values[item.name])}</span>
                   </>
                 )}

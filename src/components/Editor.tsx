@@ -63,7 +63,7 @@ function RunCard() {
       </button>
       {busy && (
         <button
-          className="flex items-center gap-1.5 rounded-lg border border-red-500/50 px-3 py-1.5 text-xs font-medium text-red-300 hover:bg-red-500/10"
+          className="flex items-center gap-1.5 rounded-lg border border-danger-tint/50 px-3 py-1.5 text-xs font-medium text-danger hover:bg-danger-tint/10"
           title="Stops every running node and cancels their requests"
           onClick={() => stop()}
         >
@@ -86,15 +86,15 @@ function RunCard() {
 const ZOOMS = [0.25, 0.5, 0.75, 1, 1.5, 2];
 
 /**
- * Arranges the selection (two or more nodes) in place, or the whole canvas
- * and then frames it.
+ * Tidies the selection (two or more nodes) in place, or the whole canvas and
+ * then frames it; `full` lays the nodes out anew instead.
  */
 function useArrange() {
   const arrangeNodes = useFlow((s) => s.arrangeNodes);
   const { fitView } = useReactFlow();
-  return useCallback(() => {
+  return useCallback((full = false) => {
     const wholeCanvas = useFlow.getState().nodes.filter((n) => n.selected).length < 2;
-    arrangeNodes();
+    arrangeNodes(full);
     // Next frame: React Flow has applied the new positions by then.
     if (wholeCanvas) requestAnimationFrame(() => fitView({ duration: 300, padding: 0.15 }));
   }, [arrangeNodes, fitView]);
@@ -130,8 +130,8 @@ function BottomBar({ tool, setTool }: { tool: Tool; setTool: (t: Tool) => void }
       <div className="mx-1 h-6 w-px bg-line" />
       <button
         className={btn}
-        onClick={arrange}
-        title={selection >= 2 ? `Arrange the ${selection} selected nodes (⇧L)` : "Arrange all nodes (⇧L)"}
+        onClick={(e) => arrange(e.altKey)}
+        title={`Tidy ${selection >= 2 ? `the ${selection} selected nodes` : "all nodes"}: tighter gaps, aligned columns, same order (⇧L). ⌥-click lays them out anew.`}
       >
         <AlignHorizontalDistributeCenter size={16} />
       </button>
@@ -161,8 +161,8 @@ function Notice() {
   const setNotice = useFlow((s) => s.setNotice);
   if (!notice) return null;
   return (
-    <div className="absolute top-16 right-4 z-20 flex max-w-sm items-start gap-2 rounded-xl border border-red-500/40 bg-panel px-3 py-2.5 text-xs shadow-xl">
-      <span className="flex-1 leading-relaxed text-red-200">{notice}</span>
+    <div className="absolute top-16 right-4 z-20 flex max-w-sm items-start gap-2 rounded-xl border border-danger-tint/40 bg-panel px-3 py-2.5 text-xs shadow-xl">
+      <span className="flex-1 leading-relaxed text-danger">{notice}</span>
       <button className="text-muted hover:text-fg" onClick={() => setNotice(null)} title="Close">
         ✕
       </button>
@@ -263,9 +263,9 @@ function Canvas() {
         // WebKit would select every text on the page; select the nodes instead.
         e.preventDefault();
         useFlow.setState((s) => ({ nodes: s.nodes.map((n) => (n.selected ? n : { ...n, selected: true })) }));
-      } else if (e.shiftKey && e.key.toLowerCase() === "l") {
+      } else if (e.shiftKey && (e.key.toLowerCase() === "l" || e.code === "KeyL")) {
         e.preventDefault();
-        arrange();
+        arrange(e.altKey);
       } else if (e.key === "v") setTool("select");
       else if (e.key === "h") setTool("pan");
     }
@@ -335,8 +335,8 @@ function Canvas() {
         defaultEdgeOptions={{ type: "default" }}
         connectionLineStyle={{ stroke: "var(--accent)", strokeWidth: 2 }}
       >
-        <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} color="#34343a" />
-        <MiniMap pannable zoomable position="bottom-right" maskColor="rgba(0,0,0,0.55)" nodeColor="#3a3a42" className="!rounded-xl !border !border-line" />
+        <Background variant={BackgroundVariant.Dots} gap={22} size={1.2} />
+        <MiniMap pannable zoomable position="bottom-right" className="!rounded-xl !border !border-line" />
       </ReactFlow>
       <RunCard />
       <Notice />

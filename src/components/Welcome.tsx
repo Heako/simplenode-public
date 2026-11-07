@@ -30,7 +30,7 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
   return (
     <li className="flex gap-3.5">
       <span
-        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[12px] font-semibold ${done ? "bg-emerald-500/20 text-emerald-300" : "bg-panel-2 text-fg"}`}
+        className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-[12px] font-semibold ${done ? "bg-success-tint/20 text-success" : "bg-panel-2 text-fg"}`}
       >
         {done ? <Check size={14} /> : n}
       </span>
@@ -157,11 +157,11 @@ export default function Welcome({ onDone }: { onDone: () => void }) {
               </div>
             )}
             {state === "error" && (
-              <p className="mt-2 text-[12px] text-red-300">
+              <p className="mt-2 text-[12px] text-danger">
                 This key doesn&apos;t work ({error.replace(/^.*?:\s*/, "")}). Check that it was copied in full.
               </p>
             )}
-            {state === "ok" && <p className="mt-2 text-[13px] text-emerald-300">Key checked and saved on this computer.</p>}
+            {state === "ok" && <p className="mt-2 text-[13px] text-success">Key checked and saved on this computer.</p>}
           </Step>
         </ol>
 
@@ -170,7 +170,7 @@ export default function Welcome({ onDone }: { onDone: () => void }) {
             {state === "ok" ? "" : "Later"}
           </button>
           <button
-            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-white disabled:opacity-40"
+            className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-[13px] font-medium text-on-accent disabled:opacity-40"
             disabled={state !== "ok"}
             onClick={onDone}
           >

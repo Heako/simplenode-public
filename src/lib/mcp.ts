@@ -13,6 +13,7 @@ import { listProjects, loadProject, newProjectId, saveProject } from "./projects
 import { findModel, isRefPort, libraryItems, portsFor, useModels, type NodeKind } from "./spec";
 import { useFlow, type FlowNode } from "./store";
 import { runsOnWaveSpeed, type KeyStatus } from "./provider";
+import { imageUpscaleCost } from "./tools";
 
 /** Mirrors `mcp::McpStatus` in src-tauri. */
 export interface McpStatus {
@@ -37,7 +38,7 @@ interface Price {
 }
 
 /** Same set as `graph::is_remote`: paid, and not re-run once they have a result. */
-const PAID = new Set<NodeKind>(["model", "enhancer", "describer", "videoDescriber", "motionPrompt", "angles", "recast", "addAudio", "upscale", "bpPortrait", "bpSeedance", "bpSeedream"]);
+const PAID = new Set<NodeKind>(["model", "enhancer", "describer", "videoDescriber", "motionPrompt", "angles", "recast", "addAudio", "upscale", "upscaleImage", "voice", "avatar", "bpPortrait", "bpSeedance", "bpSeedream"]);
 
 /** Settings of the BytePlus nodes, for list_node_types (they are not registry models). */
 const BYTEPLUS_SETTINGS: Partial<Record<NodeKind, { key: string; options: string[]; default: string; note?: string }[]>> = {
@@ -120,6 +121,20 @@ async function nodeCost(node: FlowNode): Promise<number | null> {
     case "motionPrompt":
     case "addAudio":
       return SMALL;
+    case "voice": {
+      const text = inputValue(node.id, "text") ?? p.text ?? "";
+      return invoke<number | null>("speech_cost", { kind: "voice", amount: text.length }).catch(() => null);
+    }
+    case "avatar": {
+      const audio = inputValue(node.id, "audio");
+      const seconds = audio ? await mediaDuration(audio) : null;
+      if (seconds == null) return null;
+      return invoke<number | null>("speech_cost", { kind: "avatar", amount: seconds }).catch(() => null);
+    }
+    case "upscaleImage": {
+      const keys = await invoke<KeyStatus>("key_status").catch(() => null);
+      return imageUpscaleCost(keys?.provider === "wavespeed", p.resolution);
+    }
     case "upscale": {
       const source = inputValue(node.id, "video");
       const seconds = source ? await mediaDuration(source) : null;

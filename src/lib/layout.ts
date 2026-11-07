@@ -5,6 +5,11 @@ const FALLBACK_SIZE = { width: 300, height: 240 };
 /** Vertical gap between nodes of a column, and horizontal gap between columns. */
 const NODE_GAP = 20;
 const RANK_GAP = 56;
+/** Tidy's spacing, tighter than a full layout's: links still need room between columns. */
+const TIDY_NODE_GAP = 12;
+const TIDY_COLUMN_GAP = 32;
+/** Tidy never stacks more nodes than this in a column: a busier level is split into side-by-side columns. */
+const TIDY_MAX_PER_COLUMN = 2;
 /** Space between separate workflows once packed together. */
 const GROUP_GAP = 56;
 /** Packed workflows aim for a block about this much wider than tall, like a screen. */
@@ -54,7 +59,14 @@ function components(nodes: FlowNode[], edges: Edge[]): FlowNode[][] {
  * grid. Within a column, nodes follow the height of the nodes they link to, to
  * keep links short and uncrossed. Top-left at (0, 0).
  */
-function layered(nodes: FlowNode[], edges: Edge[]): { positions: Map<string, XYPosition>; box: Box } {
+function layered(
+  nodes: FlowNode[],
+  edges: Edge[],
+  nodeGap = NODE_GAP,
+  rankGap = RANK_GAP,
+  /** At most this many nodes per column: a busier level becomes side-by-side columns, so the layout grows in width. */
+  maxPerColumn = Infinity,
+): { positions: Map<string, XYPosition>; box: Box } {
   const ids = new Set(nodes.map((n) => n.id));
   const links = edges.filter((e) => ids.has(e.source) && ids.has(e.target) && e.source !== e.target);
   const preds = new Map(nodes.map((n) => [n.id, [] as string[]]));
@@ -111,23 +123,27 @@ function layered(nodes: FlowNode[], edges: Edge[]): { positions: Map<string, XYP
   }
 
   const byId = new Map(nodes.map((n) => [n.id, n]));
+  // A level with more nodes than a column may hold becomes several columns, side by side, in the same order.
+  const laidColumns = columns.flatMap((c) =>
+    c.length <= maxPerColumn ? [c] : Array.from({ length: Math.ceil(c.length / maxPerColumn) }, (_, i) => c.slice(i * maxPerColumn, (i + 1) * maxPerColumn)),
+  );
   const positions = new Map<string, XYPosition>();
   let x = 0;
   let height = 0;
-  for (const column of columns) {
+  for (const column of laidColumns) {
     if (!column.length) continue;
     let y = 0;
     let width = 0;
     for (const id of column) {
       const size = sizeOf(byId.get(id)!);
       positions.set(id, { x, y });
-      y += size.height + NODE_GAP;
+      y += size.height + nodeGap;
       width = Math.max(width, size.width);
     }
-    height = Math.max(height, y - NODE_GAP);
-    x += width + RANK_GAP;
+    height = Math.max(height, y - nodeGap);
+    x += width + rankGap;
   }
-  return { positions, box: { width: x - RANK_GAP, height } };
+  return { positions, box: { width: x - rankGap, height } };
 }
 
 /**
@@ -174,6 +190,46 @@ function pack(boxes: Box[]): XYPosition[] {
   return best!.corners;
 }
 
+/** Moves laid-out positions down until none sits on a node left in place. */
+function clearOf(nodes: FlowNode[], positions: Map<string, XYPosition>, others: FlowNode[]): Map<string, XYPosition> {
+  const fixed: Rect[] = others.map((n) => ({ ...n.position, ...sizeOf(n) }));
+  const rects = (dy: number) => nodes.map((n) => ({ x: positions.get(n.id)!.x, y: positions.get(n.id)!.y + dy, ...sizeOf(n) }));
+  let dy = 0;
+  for (let guard = 0; guard < 100; guard++) {
+    const hits = rects(dy).flatMap((r) => fixed.filter((f) => overlaps(r, f, NODE_GAP)).map((f) => f.y + f.height + NODE_GAP - r.y));
+    if (!hits.length) break;
+    dy += Math.max(...hits);
+  }
+  return new Map([...positions].map(([id, p]) => [id, { x: p.x, y: p.y + dy }]));
+}
+
+/**
+ * Tidies `nodes` by their links, without moving workflows around: each
+ * workflow (nodes linked together) is laid out on its own, inputs left and
+ * what they feed to the right, tightly spaced, at most two nodes per column
+ * so it spreads in width rather than height, and stays anchored at its
+ * current top-left corner. A workflow only moves down if it would now sit on
+ * another one, or on the nodes left in place (`others`). A lone node stays put.
+ */
+export function tidy(nodes: FlowNode[], edges: Edge[], others: FlowNode[] = []): Map<string, XYPosition> {
+  const groups = components(nodes, edges).sort(
+    (a, b) => Math.min(...a.map((n) => n.position.y)) - Math.min(...b.map((n) => n.position.y)),
+  );
+  const positions = new Map<string, XYPosition>();
+  const placed: FlowNode[] = [...others];
+  for (const group of groups) {
+    const origin = { x: Math.min(...group.map((n) => n.position.x)), y: Math.min(...group.map((n) => n.position.y)) };
+    const { positions: relative } = layered(group, edges, TIDY_NODE_GAP, TIDY_COLUMN_GAP, TIDY_MAX_PER_COLUMN);
+    const anchored = new Map([...relative].map(([id, p]) => [id, { x: origin.x + p.x, y: origin.y + p.y }]));
+    const laid = clearOf(group, anchored, placed);
+    for (const n of group) {
+      positions.set(n.id, laid.get(n.id)!);
+      placed.push({ ...n, position: laid.get(n.id)! });
+    }
+  }
+  return positions;
+}
+
 /**
  * Arranges `nodes` compactly: each workflow (nodes linked together) is laid out
  * in top-aligned columns, a node one column right of the nodes feeding it, then the
@@ -195,18 +251,8 @@ export function arrange(nodes: FlowNode[], edges: Edge[], others: FlowNode[] = [
     for (const [id, p] of l.positions) relative.set(id, { x: corners[i].x + p.x, y: corners[i].y + p.y });
   });
 
-  // Move the whole group down until none of its nodes sits on a node left in place.
-  const fixed: Rect[] = others.map((n) => ({ ...n.position, ...sizeOf(n) }));
-  const rects = (dy: number) =>
-    nodes.map((n) => ({ x: origin.x + relative.get(n.id)!.x, y: origin.y + dy + relative.get(n.id)!.y, ...sizeOf(n) }));
-  let dy = 0;
-  for (let guard = 0; guard < 100; guard++) {
-    const hits = rects(dy).flatMap((r) => fixed.filter((f) => overlaps(r, f, NODE_GAP)).map((f) => f.y + f.height + NODE_GAP - r.y));
-    if (!hits.length) break;
-    dy += Math.max(...hits);
-  }
-
   const positions = new Map<string, XYPosition>();
-  for (const [id, p] of relative) positions.set(id, { x: origin.x + p.x, y: origin.y + dy + p.y });
-  return positions;
+  for (const [id, p] of relative) positions.set(id, { x: origin.x + p.x, y: origin.y + p.y });
+  // The whole group moves down until none of its nodes sits on a node left in place.
+  return clearOf(nodes, positions, others);
 }
