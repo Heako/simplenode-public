@@ -2,6 +2,8 @@
 
 A desktop app for building AI generation workflows as a node graph: connect prompts, images and videos to models (Nano Banana, Seedream, Kling, Veo, Seedance…), then run the graph. Models run through [fal.ai](https://fal.ai) or, for those without a fal account, [WaveSpeed](https://wavespeed.ai); optionally BytePlus ModelArk.
 
+**Website and download: [simplenode.app](https://simplenode.app)**
+
 ## Download and install (no technical skills needed)
 
 1. **Download** the `SimpleNode_x.y.z_universal.dmg` file of the latest version from the [Releases](https://github.com/Heako/simplenode-public/releases/latest) page. It works on all recent Macs (Apple M1 to M4 chips, or Intel), with macOS 11 or later.
